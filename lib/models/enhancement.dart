@@ -6,6 +6,7 @@ class Enhancement {
     required this.createdAt,
     required this.originalWidth,
     required this.originalHeight,
+    required this.engine,
   });
 
   final String originalPath;
@@ -14,6 +15,7 @@ class Enhancement {
   final DateTime createdAt;
   final int originalWidth;
   final int originalHeight;
+  final String engine;
 
   int get outputWidth => originalWidth * scale;
   int get outputHeight => originalHeight * scale;

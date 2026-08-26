@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:gal/gal.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
@@ -77,9 +78,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _pickMedia() async {
     if (_videoMode) {
-      _message(
-        'Video enhancement is the next engine milestone. Image mode is ready now.',
-      );
+      setState(() => _picking = true);
+      try {
+        final file = await _picker.pickVideo(source: ImageSource.gallery);
+        if (file == null || !mounted) return;
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => VideoSelectedScreen(inputPath: file.path),
+          ),
+        );
+      } catch (_) {
+        _message('AniScale could not open that video. Try MP4 or MOV.');
+      } finally {
+        if (mounted) setState(() => _picking = false);
+      }
       return;
     }
     setState(() => _picking = true);
@@ -175,6 +187,110 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+class VideoSelectedScreen extends StatelessWidget {
+  const VideoSelectedScreen({super.key, required this.inputPath});
+
+  final String inputPath;
+
+  @override
+  Widget build(BuildContext context) {
+    final file = File(inputPath);
+    final filename = inputPath.split(Platform.pathSeparator).last;
+    return Scaffold(
+      appBar: const GlassAppBar(title: 'Video'),
+      body: AmbientBackground(
+        child: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 28, 20, 140),
+            children: [
+              GlassCard(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 42,
+                ),
+                child: Column(
+                  children: [
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: aniGradient,
+                      ),
+                      child: Padding(
+                        padding: EdgeInsets.all(18),
+                        child: Icon(
+                          Icons.video_file_rounded,
+                          color: Colors.white,
+                          size: 34,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    const Text(
+                      'Video selected',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      filename,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: AniColors.secondaryText),
+                    ),
+                    const SizedBox(height: 8),
+                    FutureBuilder<int>(
+                      future: file.length(),
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData) return const SizedBox.shrink();
+                        final megabytes = snapshot.data! / (1024 * 1024);
+                        return Text(
+                          '${megabytes.toStringAsFixed(1)} MB • kept on this device',
+                          style: const TextStyle(
+                            color: AniColors.mutedText,
+                            fontSize: 12,
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+              const GlassCard(
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    Icons.movie_filter_rounded,
+                    color: AniColors.blue,
+                  ),
+                  title: Text('Video AI is the next engine stage'),
+                  subtitle: Text(
+                    'It needs a faster frame model, audio preservation, and storage checks. Image AI is active in this build.',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Your video was selected locally and was never uploaded.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AniColors.mutedText, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: BottomAction(
+        label: 'Choose an Image to Upscale',
+        note: 'Real-ESRGAN image processing is ready now.',
+        onPressed: () => Navigator.of(context).pop(),
+      ),
+    );
+  }
+}
+
 class EditorScreen extends StatefulWidget {
   const EditorScreen({
     super.key,
@@ -191,10 +307,6 @@ class EditorScreen extends StatefulWidget {
 
 class _EditorScreenState extends State<EditorScreen> {
   int _scale = 2;
-  int _style = 0;
-  double _noise = .3;
-  double _sharpness = .55;
-  double _detail = .65;
   bool _transparency = true;
 
   void _start() {
@@ -203,6 +315,7 @@ class _EditorScreenState extends State<EditorScreen> {
         builder: (_) => ProcessingScreen(
           inputPath: widget.inputPath,
           scale: _scale,
+          preserveTransparency: _transparency,
           onEnhanced: widget.onEnhanced,
         ),
       ),
@@ -218,10 +331,7 @@ class _EditorScreenState extends State<EditorScreen> {
         trailing: TextButton(
           onPressed: () => setState(() {
             _scale = 2;
-            _style = 0;
-            _noise = .3;
-            _sharpness = .55;
-            _detail = .65;
+            _transparency = true;
           }),
           child: const Text('Reset'),
         ),
@@ -285,36 +395,25 @@ class _EditorScreenState extends State<EditorScreen> {
               const SizedBox(height: 22),
               const ControlLabel('STYLE'),
               const SizedBox(height: 9),
-              SegmentedGlass(
-                labels: const ['Anime', 'Illustration', 'Photo'],
-                selected: _style,
-                onSelected: (index) => setState(() => _style = index),
-              ),
-              const SizedBox(height: 18),
-              GlassCard(
-                child: Column(
-                  children: [
-                    TuningSlider(
-                      label: 'Noise reduction',
-                      value: _noise,
-                      onChanged: (v) => setState(() => _noise = v),
-                    ),
-                    const Divider(color: AniColors.border, height: 1),
-                    TuningSlider(
-                      label: 'Sharpness',
-                      value: _sharpness,
-                      onChanged: (v) => setState(() => _sharpness = v),
-                    ),
-                    const Divider(color: AniColors.border, height: 1),
-                    TuningSlider(
-                      label: 'Detail recovery',
-                      value: _detail,
-                      onChanged: (v) => setState(() => _detail = v),
-                    ),
-                  ],
+              const GlassCard(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    Icons.auto_awesome_rounded,
+                    color: AniColors.purple,
+                  ),
+                  title: Text('Anime & Illustration AI'),
+                  subtitle: Text(
+                    'Real-ESRGAN Anime 6B automatically restores detail and cleans edges.',
+                  ),
+                  trailing: Icon(
+                    Icons.check_circle_rounded,
+                    color: AniColors.success,
+                  ),
                 ),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 18),
               GlassCard(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
@@ -347,11 +446,13 @@ class ProcessingScreen extends StatefulWidget {
     super.key,
     required this.inputPath,
     required this.scale,
+    required this.preserveTransparency,
     required this.onEnhanced,
   });
 
   final String inputPath;
   final int scale;
+  final bool preserveTransparency;
   final ValueChanged<Enhancement> onEnhanced;
 
   @override
@@ -363,6 +464,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   int _status = 0;
   bool _cancelled = false;
   Timer? _timer;
+  StreamSubscription<double>? _progressSubscription;
   static const _statuses = [
     'Preparing media',
     'Processing pixels',
@@ -377,10 +479,10 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   }
 
   Future<void> _run() async {
-    _timer = Timer.periodic(const Duration(milliseconds: 420), (_) {
+    _progressSubscription = upscaleProgress.listen((progress) {
       if (!mounted || _cancelled) return;
       setState(() {
-        _progress = (_progress + .035).clamp(0, .88);
+        _progress = (.06 + progress * .88).clamp(.06, .94);
         _status = ((_progress * _statuses.length).floor()).clamp(
           0,
           _statuses.length - 1,
@@ -388,9 +490,18 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
       });
     });
 
+    _timer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (!mounted || _cancelled || _progress >= .12) return;
+      setState(() => _progress = (_progress + .01).clamp(.04, .12));
+    });
+
     try {
       final result = await upscaleLocally(
-        UpscaleRequest(path: widget.inputPath, scale: widget.scale),
+        UpscaleRequest(
+          path: widget.inputPath,
+          scale: widget.scale,
+          preserveTransparency: widget.preserveTransparency,
+        ),
       );
       if (!mounted || _cancelled) return;
       _timer?.cancel();
@@ -402,6 +513,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
         createdAt: DateTime.now(),
         originalWidth: result.originalWidth,
         originalHeight: result.originalHeight,
+        engine: result.engine,
       );
       widget.onEnhanced(enhancement);
       await Future<void>.delayed(const Duration(milliseconds: 420));
@@ -411,16 +523,14 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
           builder: (_) => ResultScreen(enhancement: enhancement),
         ),
       );
-    } catch (_) {
+    } catch (error) {
       _timer?.cancel();
       if (!mounted || _cancelled) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Upscaling failed. Try a smaller image or free some device memory.',
-          ),
-        ),
-      );
+      final detail = error is PlatformException && error.message != null
+          ? error.message!
+          : 'Try a smaller image or free some device memory.';
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Upscaling failed. $detail')));
       Navigator.of(context).pop();
     }
   }
@@ -428,6 +538,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _progressSubscription?.cancel();
     super.dispose();
   }
 
@@ -496,9 +607,11 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                 ),
                 const SizedBox(height: 24),
                 TextButton(
-                  onPressed: () {
+                  onPressed: () async {
                     _cancelled = true;
                     _timer?.cancel();
+                    await cancelUpscale();
+                    if (!context.mounted) return;
                     Navigator.of(context).pop();
                   },
                   child: const Text(
@@ -591,6 +704,14 @@ class _ResultScreenState extends State<ResultScreen> {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 24),
+              Center(
+                child: FeaturePill(
+                  icon: Icons.memory_rounded,
+                  label: e.engine,
+                  color: AniColors.blue,
+                ),
+              ),
+              const SizedBox(height: 16),
               GlassCard(
                 padding: const EdgeInsets.all(8),
                 child: LayoutBuilder(

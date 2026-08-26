@@ -7,7 +7,7 @@ jobs:
   build-ios:
     name: Build AniScale for iPhone
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Check out AniScale
@@ -28,6 +28,30 @@ jobs:
       - name: Resolve Flutter packages
         shell: bash
         run: flutter pub get
+
+      - name: Set up Python for the Core ML model
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Restore converted anime model
+        id: coreml-cache
+        uses: actions/cache@v4
+        with:
+          path: ios/Runner/Models/RealESRGAN_anime_6B_266_fp16.mlpackage
+          key: coreml-anime-6b-ios15-266-${{ hashFiles('tools/convert_realesrgan_coreml.py') }}
+
+      - name: Convert Real-ESRGAN for iPhone
+        if: steps.coreml-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "numpy<2" "torch==2.5.1" "coremltools==8.1"
+          python tools/convert_realesrgan_coreml.py
+
+      - name: Verify Core ML model exists
+        shell: bash
+        run: test -f ios/Runner/Models/RealESRGAN_anime_6B_266_fp16.mlpackage/Manifest.json
 
       - name: Analyze project
         shell: bash
@@ -55,4 +79,4 @@ jobs:
           name: AniScale-unsigned-ipa
           path: AniScale-unsigned.ipa
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14

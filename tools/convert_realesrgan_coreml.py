@@ -1,0 +1,129 @@
+"""Convert the official Real-ESRGAN anime 6B weights for AniScale iOS.
+
+The generated model has a fixed 266x266 input: a 256px image tile plus
+10px reflected padding. AniScale stitches tiles on-device in Swift.
+"""
+
+from pathlib import Path
+from urllib.request import urlretrieve
+import hashlib
+
+import coremltools as ct
+import torch
+import torch.nn as nn
+import torch.nn.functional as functional
+
+
+ROOT = Path(__file__).resolve().parents[1]
+MODEL_DIR = ROOT / "ios" / "Runner" / "Models"
+WEIGHTS = MODEL_DIR / "RealESRGAN_x4plus_anime_6B.pth"
+OUTPUT = MODEL_DIR / "RealESRGAN_anime_6B_266_fp16.mlpackage"
+WEIGHTS_URL = (
+    "https://github.com/xinntao/Real-ESRGAN/releases/download/"
+    "v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth"
+)
+WEIGHTS_SHA256 = "f872d837d3c90ed2e05227bed711af5671a6fd1c9f7d7e91c911a61f155e99da"
+
+
+class ResidualDenseBlock(nn.Module):
+    def __init__(self, features: int = 64, growth: int = 32):
+        super().__init__()
+        self.conv1 = nn.Conv2d(features, growth, 3, 1, 1)
+        self.conv2 = nn.Conv2d(features + growth, growth, 3, 1, 1)
+        self.conv3 = nn.Conv2d(features + growth * 2, growth, 3, 1, 1)
+        self.conv4 = nn.Conv2d(features + growth * 3, growth, 3, 1, 1)
+        self.conv5 = nn.Conv2d(features + growth * 4, features, 3, 1, 1)
+
+    def forward(self, value):
+        value1 = functional.leaky_relu(self.conv1(value), 0.2)
+        value2 = functional.leaky_relu(self.conv2(torch.cat((value, value1), 1)), 0.2)
+        value3 = functional.leaky_relu(
+            self.conv3(torch.cat((value, value1, value2), 1)), 0.2
+        )
+        value4 = functional.leaky_relu(
+            self.conv4(torch.cat((value, value1, value2, value3), 1)), 0.2
+        )
+        value5 = self.conv5(torch.cat((value, value1, value2, value3, value4), 1))
+        return value5 * 0.2 + value
+
+
+class ResidualInResidualDenseBlock(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.rdb1 = ResidualDenseBlock()
+        self.rdb2 = ResidualDenseBlock()
+        self.rdb3 = ResidualDenseBlock()
+
+    def forward(self, value):
+        output = self.rdb1(value)
+        output = self.rdb2(output)
+        output = self.rdb3(output)
+        return output * 0.2 + value
+
+
+class AnimeRRDBNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv_first = nn.Conv2d(3, 64, 3, 1, 1)
+        self.body = nn.Sequential(
+            *[ResidualInResidualDenseBlock() for _ in range(6)]
+        )
+        self.conv_body = nn.Conv2d(64, 64, 3, 1, 1)
+        self.conv_up1 = nn.Conv2d(64, 64, 3, 1, 1)
+        self.conv_up2 = nn.Conv2d(64, 64, 3, 1, 1)
+        self.conv_hr = nn.Conv2d(64, 64, 3, 1, 1)
+        self.conv_last = nn.Conv2d(64, 3, 3, 1, 1)
+
+    def forward(self, value):
+        features = self.conv_first(value)
+        body = self.conv_body(self.body(features))
+        features = features + body
+        features = functional.leaky_relu(
+            self.conv_up1(functional.interpolate(features, scale_factor=2, mode="nearest")),
+            0.2,
+        )
+        features = functional.leaky_relu(
+            self.conv_up2(functional.interpolate(features, scale_factor=2, mode="nearest")),
+            0.2,
+        )
+        return self.conv_last(functional.leaky_relu(self.conv_hr(features), 0.2))
+
+
+def main():
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    if OUTPUT.exists():
+        print(f"Core ML model already exists: {OUTPUT}")
+        return
+    if not WEIGHTS.exists():
+        print("Downloading official Real-ESRGAN anime 6B weights...")
+        urlretrieve(WEIGHTS_URL, WEIGHTS)
+    digest = hashlib.sha256(WEIGHTS.read_bytes()).hexdigest()
+    if digest != WEIGHTS_SHA256:
+        WEIGHTS.unlink(missing_ok=True)
+        raise RuntimeError(f"Real-ESRGAN weights checksum mismatch: {digest}")
+
+    network = AnimeRRDBNet()
+    checkpoint = torch.load(WEIGHTS, map_location="cpu", weights_only=True)
+    network.load_state_dict(checkpoint.get("params_ema", checkpoint), strict=True)
+    network.eval()
+
+    example = torch.zeros(1, 3, 266, 266)
+    with torch.no_grad():
+        traced = torch.jit.trace(network, example)
+
+    model = ct.convert(
+        traced,
+        inputs=[ct.TensorType(name="input", shape=example.shape)],
+        minimum_deployment_target=ct.target.iOS15,
+        convert_to="mlprogram",
+        compute_precision=ct.precision.FLOAT16,
+    )
+    model.author = "Xintao Wang et al.; iOS conversion for AniScale"
+    model.license = "BSD-3-Clause"
+    model.short_description = "4x anime and illustration super-resolution"
+    model.save(OUTPUT)
+    print(f"Saved {OUTPUT}")
+
+
+if __name__ == "__main__":
+    main()

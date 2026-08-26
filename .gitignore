@@ -34,6 +34,9 @@ migrate_working_dir/
 /coverage/
 /outputs/
 /work/
+/ios/Runner/Models/*.mlpackage/
+/ios/Runner/Models/*.pth
+/RealESRGAN_*.zip
 
 # Symbolication related
 app.*.symbols
