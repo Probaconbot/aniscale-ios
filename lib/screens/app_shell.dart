@@ -1,0 +1,1636 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:ui';
+
+import 'package:flutter/material.dart';
+import 'package:gal/gal.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:share_plus/share_plus.dart';
+
+import '../models/enhancement.dart';
+import '../services/upscale_service.dart';
+import '../theme/app_theme.dart';
+
+class AppShell extends StatefulWidget {
+  const AppShell({super.key});
+
+  @override
+  State<AppShell> createState() => _AppShellState();
+}
+
+class _AppShellState extends State<AppShell> {
+  int _tab = 0;
+  final List<Enhancement> _history = [];
+
+  void _addEnhancement(Enhancement enhancement) {
+    setState(() => _history.insert(0, enhancement));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = [
+      HomeScreen(
+        history: _history,
+        onOpenSettings: () => setState(() => _tab = 2),
+        onEnhanced: _addEnhancement,
+      ),
+      HistoryScreen(history: _history),
+      SettingsScreen(onClearHistory: () => setState(_history.clear)),
+    ];
+
+    return Scaffold(
+      extendBody: true,
+      body: AmbientBackground(
+        child: SafeArea(
+          bottom: false,
+          child: IndexedStack(index: _tab, children: pages),
+        ),
+      ),
+      bottomNavigationBar: FloatingNav(
+        selectedIndex: _tab,
+        onSelected: (index) => setState(() => _tab = index),
+      ),
+    );
+  }
+}
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({
+    super.key,
+    required this.history,
+    required this.onOpenSettings,
+    required this.onEnhanced,
+  });
+
+  final List<Enhancement> history;
+  final VoidCallback onOpenSettings;
+  final ValueChanged<Enhancement> onEnhanced;
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final _picker = ImagePicker();
+  bool _videoMode = false;
+  bool _picking = false;
+
+  Future<void> _pickMedia() async {
+    if (_videoMode) {
+      _message(
+        'Video enhancement is the next engine milestone. Image mode is ready now.',
+      );
+      return;
+    }
+    setState(() => _picking = true);
+    try {
+      final file = await _picker.pickImage(source: ImageSource.gallery);
+      if (file == null || !mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) =>
+              EditorScreen(inputPath: file.path, onEnhanced: widget.onEnhanced),
+        ),
+      );
+    } catch (_) {
+      _message('AniScale could not open that image. Try PNG, JPG, or WebP.');
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  void _message(String text) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomScrollView(
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(22, 16, 22, 124),
+          sliver: SliverList.list(
+            children: [
+              BrandHeader(onSettings: widget.onOpenSettings),
+              const SizedBox(height: 34),
+              Text(
+                'Enhance every detail.',
+                style: Theme.of(context).textTheme.displaySmall,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Upscale anime art, illustrations, and video frames privately on your device.',
+                style: TextStyle(
+                  color: AniColors.secondaryText,
+                  fontSize: 15,
+                  height: 1.45,
+                ),
+              ),
+              const SizedBox(height: 24),
+              SegmentedGlass(
+                labels: const ['Image', 'Video'],
+                selected: _videoMode ? 1 : 0,
+                onSelected: (index) => setState(() => _videoMode = index == 1),
+              ),
+              const SizedBox(height: 18),
+              UploadCard(
+                videoMode: _videoMode,
+                loading: _picking,
+                onPressed: _pickMedia,
+              ),
+              const SizedBox(height: 18),
+              const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  FeaturePill(
+                    icon: Icons.auto_awesome_rounded,
+                    label: 'Free',
+                    color: AniColors.purple,
+                  ),
+                  SizedBox(width: 8),
+                  FeaturePill(
+                    icon: Icons.phone_iphone_rounded,
+                    label: 'Offline',
+                    color: AniColors.blue,
+                  ),
+                  SizedBox(width: 8),
+                  FeaturePill(
+                    icon: Icons.shield_outlined,
+                    label: 'Private',
+                    color: AniColors.success,
+                  ),
+                ],
+              ),
+              if (widget.history.isNotEmpty) ...[
+                const SizedBox(height: 30),
+                const SectionTitle(title: 'Recent', action: 'See all'),
+                const SizedBox(height: 12),
+                ...widget.history.take(2).map(HistoryTile.new),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class EditorScreen extends StatefulWidget {
+  const EditorScreen({
+    super.key,
+    required this.inputPath,
+    required this.onEnhanced,
+  });
+
+  final String inputPath;
+  final ValueChanged<Enhancement> onEnhanced;
+
+  @override
+  State<EditorScreen> createState() => _EditorScreenState();
+}
+
+class _EditorScreenState extends State<EditorScreen> {
+  int _scale = 2;
+  int _style = 0;
+  double _noise = .3;
+  double _sharpness = .55;
+  double _detail = .65;
+  bool _transparency = true;
+
+  void _start() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ProcessingScreen(
+          inputPath: widget.inputPath,
+          scale: _scale,
+          onEnhanced: widget.onEnhanced,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      extendBodyBehindAppBar: true,
+      appBar: GlassAppBar(
+        title: 'Upscale',
+        trailing: TextButton(
+          onPressed: () => setState(() {
+            _scale = 2;
+            _style = 0;
+            _noise = .3;
+            _sharpness = .55;
+            _detail = .65;
+          }),
+          child: const Text('Reset'),
+        ),
+      ),
+      body: AmbientBackground(
+        child: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 150),
+            children: [
+              GlassCard(
+                padding: const EdgeInsets.all(8),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: SizedBox(
+                    height: 310,
+                    child: InteractiveViewer(
+                      minScale: .7,
+                      maxScale: 5,
+                      child: Image.file(
+                        File(widget.inputPath),
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              GlassCard(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Metadata(
+                        label: 'ORIGINAL',
+                        value: 'Auto detected',
+                      ),
+                    ),
+                    Container(width: 1, height: 28, color: AniColors.border),
+                    Expanded(
+                      child: Metadata(
+                        label: 'OUTPUT',
+                        value: '$_scale× resolution',
+                        alignEnd: true,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 22),
+              const ControlLabel('UPSCALE'),
+              const SizedBox(height: 9),
+              SegmentedGlass(
+                labels: const ['2×', '4×'],
+                selected: _scale == 2 ? 0 : 1,
+                onSelected: (index) =>
+                    setState(() => _scale = index == 0 ? 2 : 4),
+              ),
+              const SizedBox(height: 22),
+              const ControlLabel('STYLE'),
+              const SizedBox(height: 9),
+              SegmentedGlass(
+                labels: const ['Anime', 'Illustration', 'Photo'],
+                selected: _style,
+                onSelected: (index) => setState(() => _style = index),
+              ),
+              const SizedBox(height: 18),
+              GlassCard(
+                child: Column(
+                  children: [
+                    TuningSlider(
+                      label: 'Noise reduction',
+                      value: _noise,
+                      onChanged: (v) => setState(() => _noise = v),
+                    ),
+                    const Divider(color: AniColors.border, height: 1),
+                    TuningSlider(
+                      label: 'Sharpness',
+                      value: _sharpness,
+                      onChanged: (v) => setState(() => _sharpness = v),
+                    ),
+                    const Divider(color: AniColors.border, height: 1),
+                    TuningSlider(
+                      label: 'Detail recovery',
+                      value: _detail,
+                      onChanged: (v) => setState(() => _detail = v),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              GlassCard(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                child: SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Preserve transparency'),
+                  subtitle: const Text('PNG output is used when needed.'),
+                  value: _transparency,
+                  activeTrackColor: AniColors.purple,
+                  onChanged: (value) => setState(() => _transparency = value),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: BottomAction(
+        label: 'Start Upscaling',
+        note: 'Processing happens entirely on your device.',
+        onPressed: _start,
+      ),
+    );
+  }
+}
+
+class ProcessingScreen extends StatefulWidget {
+  const ProcessingScreen({
+    super.key,
+    required this.inputPath,
+    required this.scale,
+    required this.onEnhanced,
+  });
+
+  final String inputPath;
+  final int scale;
+  final ValueChanged<Enhancement> onEnhanced;
+
+  @override
+  State<ProcessingScreen> createState() => _ProcessingScreenState();
+}
+
+class _ProcessingScreenState extends State<ProcessingScreen> {
+  double _progress = .04;
+  int _status = 0;
+  bool _cancelled = false;
+  Timer? _timer;
+  static const _statuses = [
+    'Preparing media',
+    'Processing pixels',
+    'Preserving details',
+    'Finishing',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _run();
+  }
+
+  Future<void> _run() async {
+    _timer = Timer.periodic(const Duration(milliseconds: 420), (_) {
+      if (!mounted || _cancelled) return;
+      setState(() {
+        _progress = (_progress + .035).clamp(0, .88);
+        _status = ((_progress * _statuses.length).floor()).clamp(
+          0,
+          _statuses.length - 1,
+        );
+      });
+    });
+
+    try {
+      final result = await upscaleLocally(
+        UpscaleRequest(path: widget.inputPath, scale: widget.scale),
+      );
+      if (!mounted || _cancelled) return;
+      _timer?.cancel();
+      setState(() => _progress = 1);
+      final enhancement = Enhancement(
+        originalPath: widget.inputPath,
+        outputPath: result.path,
+        scale: widget.scale,
+        createdAt: DateTime.now(),
+        originalWidth: result.originalWidth,
+        originalHeight: result.originalHeight,
+      );
+      widget.onEnhanced(enhancement);
+      await Future<void>.delayed(const Duration(milliseconds: 420));
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => ResultScreen(enhancement: enhancement),
+        ),
+      );
+    } catch (_) {
+      _timer?.cancel();
+      if (!mounted || _cancelled) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Upscaling failed. Try a smaller image or free some device memory.',
+          ),
+        ),
+      );
+      Navigator.of(context).pop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: AmbientBackground(
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              children: [
+                const Spacer(),
+                GlassCard(
+                  padding: const EdgeInsets.all(8),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(18),
+                    child: Stack(
+                      children: [
+                        SizedBox(
+                          height: 320,
+                          width: double.infinity,
+                          child: Image.file(
+                            File(widget.inputPath),
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        Positioned.fill(child: ScanLine(progress: _progress)),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 34),
+                SizedBox(
+                  width: 82,
+                  height: 82,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      CircularProgressIndicator(
+                        value: _progress,
+                        strokeWidth: 6,
+                        backgroundColor: const Color(0xFF24283B),
+                        color: AniColors.blue,
+                      ),
+                      Center(
+                        child: Text(
+                          '${(_progress * 100).round()}%',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 22),
+                Text(
+                  'Enhancing your image…',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 8),
+                Text(_statuses[_status]),
+                const SizedBox(height: 8),
+                const Text(
+                  'You can keep the app open while processing.',
+                  style: TextStyle(color: AniColors.mutedText, fontSize: 12),
+                ),
+                const SizedBox(height: 24),
+                TextButton(
+                  onPressed: () {
+                    _cancelled = true;
+                    _timer?.cancel();
+                    Navigator.of(context).pop();
+                  },
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(color: AniColors.secondaryText),
+                  ),
+                ),
+                const Spacer(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class ResultScreen extends StatefulWidget {
+  const ResultScreen({super.key, required this.enhancement});
+
+  final Enhancement enhancement;
+
+  @override
+  State<ResultScreen> createState() => _ResultScreenState();
+}
+
+class _ResultScreenState extends State<ResultScreen> {
+  double _split = .5;
+  bool _saving = false;
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      await Gal.putImage(widget.enhancement.outputPath, album: 'AniScale');
+      if (mounted) _message('Saved to Photos.');
+    } catch (_) {
+      if (mounted) {
+        _message(
+          'Could not save the image. Check photo permissions and storage.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _share() async {
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(widget.enhancement.outputPath)],
+        text: 'Enhanced privately with AniScale',
+      ),
+    );
+  }
+
+  void _message(String text) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+
+  @override
+  Widget build(BuildContext context) {
+    final e = widget.enhancement;
+    return Scaffold(
+      appBar: const GlassAppBar(title: 'Result'),
+      body: AmbientBackground(
+        child: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 150),
+            children: [
+              const Center(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: aniGradient,
+                  ),
+                  child: Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Icon(Icons.check_rounded, color: Colors.white),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Your image is ready.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Enhanced privately on your device.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              GlassCard(
+                padding: const EdgeInsets.all(8),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    return GestureDetector(
+                      onHorizontalDragUpdate: (details) {
+                        setState(
+                          () => _split =
+                              (details.localPosition.dx / constraints.maxWidth)
+                                  .clamp(.05, .95),
+                        );
+                      },
+                      onTapDown: (details) {
+                        setState(
+                          () => _split =
+                              (details.localPosition.dx / constraints.maxWidth)
+                                  .clamp(.05, .95),
+                        );
+                      },
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(18),
+                        child: SizedBox(
+                          height: 370,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Image.file(File(e.outputPath), fit: BoxFit.cover),
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                widthFactor: _split,
+                                child: ClipRect(
+                                  child: Align(
+                                    alignment: Alignment.centerLeft,
+                                    widthFactor: _split,
+                                    child: SizedBox(
+                                      width: constraints.maxWidth,
+                                      height: 370,
+                                      child: Image.file(
+                                        File(e.originalPath),
+                                        fit: BoxFit.cover,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Positioned(
+                                left: 12,
+                                top: 12,
+                                child: CompareBadge('Before'),
+                              ),
+                              Positioned(
+                                right: 12,
+                                top: 12,
+                                child: CompareBadge('After'),
+                              ),
+                              Positioned(
+                                left: constraints.maxWidth * _split - 1,
+                                top: 0,
+                                bottom: 0,
+                                child: Container(width: 2, color: Colors.white),
+                              ),
+                              Positioned(
+                                left: constraints.maxWidth * _split - 18,
+                                top: 168,
+                                child: const CircleAvatar(
+                                  radius: 18,
+                                  backgroundColor: Colors.white,
+                                  child: Icon(
+                                    Icons.drag_handle_rounded,
+                                    color: AniColors.deepNavy,
+                                    size: 20,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 14),
+              GlassCard(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Metadata(
+                        label: 'BEFORE',
+                        value: '${e.originalWidth} × ${e.originalHeight}',
+                      ),
+                    ),
+                    const Icon(
+                      Icons.arrow_forward_rounded,
+                      color: AniColors.purple,
+                    ),
+                    Expanded(
+                      child: Metadata(
+                        label: 'AFTER',
+                        value: '${e.outputWidth} × ${e.outputHeight}',
+                        alignEnd: true,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _share,
+                icon: const Icon(Icons.ios_share_rounded),
+                label: const Text('Share'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                  side: const BorderSide(color: AniColors.border),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: BottomAction(
+        label: _saving ? 'Saving…' : 'Save to Photos',
+        note: 'No watermark. Original quality preserved.',
+        onPressed: _saving ? null : _save,
+      ),
+    );
+  }
+}
+
+class HistoryScreen extends StatelessWidget {
+  const HistoryScreen({super.key, required this.history});
+
+  final List<Enhancement> history;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(22, 22, 22, 120),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('History', style: Theme.of(context).textTheme.displaySmall),
+          const SizedBox(height: 8),
+          const Text('Your enhancements stay on this device.'),
+          const SizedBox(height: 24),
+          if (history.isEmpty)
+            const Expanded(child: EmptyHistory())
+          else
+            Expanded(
+              child: ListView.separated(
+                itemCount: history.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 10),
+                itemBuilder: (_, index) => HistoryTile(history[index]),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({super.key, required this.onClearHistory});
+
+  final VoidCallback onClearHistory;
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  bool _saveHistory = true;
+  bool _metadata = true;
+  bool _reduceMotion = false;
+  int _performance = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(22, 22, 22, 124),
+      children: [
+        Text('Settings', style: Theme.of(context).textTheme.displaySmall),
+        const SizedBox(height: 24),
+        const ControlLabel('OUTPUT'),
+        const SizedBox(height: 9),
+        GlassCard(
+          child: Column(
+            children: [
+              const SettingRow(
+                icon: Icons.image_outlined,
+                title: 'Default format',
+                value: 'PNG',
+              ),
+              const Divider(color: AniColors.border, height: 1),
+              SwitchListTile.adaptive(
+                title: const Text('Preserve metadata'),
+                value: _metadata,
+                activeTrackColor: AniColors.purple,
+                onChanged: (v) => setState(() => _metadata = v),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        const ControlLabel('PERFORMANCE'),
+        const SizedBox(height: 9),
+        GlassCard(
+          child: Column(
+            children: [
+              const SettingRow(
+                icon: Icons.grid_view_rounded,
+                title: 'Tile size',
+                value: 'Automatic',
+              ),
+              const Divider(color: AniColors.border, height: 1),
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: SegmentedGlass(
+                  labels: const ['Balanced', 'Quality', 'Faster'],
+                  selected: _performance,
+                  onSelected: (i) => setState(() => _performance = i),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        const ControlLabel('PRIVACY & APPEARANCE'),
+        const SizedBox(height: 9),
+        GlassCard(
+          child: Column(
+            children: [
+              SwitchListTile.adaptive(
+                title: const Text('Save processing history'),
+                value: _saveHistory,
+                activeTrackColor: AniColors.purple,
+                onChanged: (v) => setState(() => _saveHistory = v),
+              ),
+              const Divider(color: AniColors.border, height: 1),
+              SwitchListTile.adaptive(
+                title: const Text('Reduce animations'),
+                value: _reduceMotion,
+                activeTrackColor: AniColors.purple,
+                onChanged: (v) => setState(() => _reduceMotion = v),
+              ),
+              const Divider(color: AniColors.border, height: 1),
+              ListTile(
+                leading: const Icon(
+                  Icons.delete_outline_rounded,
+                  color: AniColors.error,
+                ),
+                title: const Text('Clear history'),
+                onTap: () {
+                  widget.onClearHistory();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Local history cleared.')),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        const GlassCard(
+          child: ListTile(
+            leading: Icon(Icons.shield_outlined, color: AniColors.success),
+            title: Text('Private by design'),
+            subtitle: Text(
+              'All processing is performed locally. Your images and videos are never uploaded.',
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+        const ControlLabel('ABOUT'),
+        const SizedBox(height: 9),
+        const GlassCard(
+          child: Column(
+            children: [
+              SettingRow(
+                icon: Icons.info_outline_rounded,
+                title: 'About AniScale',
+                value: '1.0.0',
+              ),
+              Divider(color: AniColors.border, height: 1),
+              SettingRow(
+                icon: Icons.memory_rounded,
+                title: 'Upscale engine',
+                value: 'Local MVP',
+              ),
+              Divider(color: AniColors.border, height: 1),
+              SettingRow(
+                icon: Icons.description_outlined,
+                title: 'Open-source licences',
+                value: '',
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class AmbientBackground extends StatelessWidget {
+  const AmbientBackground({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        color: AniColors.background,
+        gradient: RadialGradient(
+          center: Alignment(-.8, -.85),
+          radius: 1.25,
+          colors: [Color(0x332B185D), AniColors.background],
+          stops: [0, .75],
+        ),
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned(
+            right: -120,
+            bottom: 40,
+            child: Container(
+              width: 280,
+              height: 280,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [Color(0x2238BDF8), Colors.transparent],
+                ),
+              ),
+            ),
+          ),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class GlassCard extends StatelessWidget {
+  const GlassCard({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.all(16),
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(22),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: Container(
+          padding: padding,
+          decoration: BoxDecoration(
+            color: AniColors.glass,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: AniColors.border),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x33000000),
+                blurRadius: 28,
+                offset: Offset(0, 12),
+              ),
+            ],
+          ),
+          child: Material(type: MaterialType.transparency, child: child),
+        ),
+      ),
+    );
+  }
+}
+
+class BrandHeader extends StatelessWidget {
+  const BrandHeader({super.key, required this.onSettings});
+
+  final VoidCallback onSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            gradient: aniGradient,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Icon(Icons.auto_awesome_rounded, size: 18),
+        ),
+        const SizedBox(width: 10),
+        const Text(
+          'AniScale',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+        ),
+        const Spacer(),
+        IconButton.filledTonal(
+          onPressed: onSettings,
+          icon: const Icon(Icons.tune_rounded, size: 20),
+          style: IconButton.styleFrom(
+            backgroundColor: AniColors.glass,
+            side: const BorderSide(color: AniColors.border),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class UploadCard extends StatelessWidget {
+  const UploadCard({
+    super.key,
+    required this.videoMode,
+    required this.loading,
+    required this.onPressed,
+  });
+
+  final bool videoMode;
+  final bool loading;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassCard(
+      padding: const EdgeInsets.fromLTRB(24, 38, 24, 26),
+      child: Column(
+        children: [
+          ShaderMask(
+            shaderCallback: aniGradient.createShader,
+            child: Icon(
+              videoMode ? Icons.video_library_outlined : Icons.image_outlined,
+              color: Colors.white,
+              size: 44,
+            ),
+          ),
+          const SizedBox(height: 22),
+          Text(
+            videoMode ? 'Choose a video.' : 'Choose an image.',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            videoMode ? 'MP4 or MOV. Processed offline.' : 'PNG, JPG, or WebP.',
+            style: const TextStyle(color: AniColors.mutedText),
+          ),
+          const SizedBox(height: 24),
+          GradientButton(
+            label: loading
+                ? 'Opening…'
+                : (videoMode ? 'Select Video' : 'Select Image'),
+            icon: loading ? null : Icons.add_photo_alternate_outlined,
+            onPressed: loading ? null : onPressed,
+          ),
+          const SizedBox(height: 18),
+          Container(
+            height: 46,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: const Color(0x2BFFFFFF),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AniColors.border),
+            ),
+            child: const Text(
+              'or drag & drop here',
+              style: TextStyle(color: AniColors.mutedText, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class GradientButton extends StatelessWidget {
+  const GradientButton({
+    super.key,
+    required this.label,
+    this.icon,
+    this.onPressed,
+  });
+
+  final String label;
+  final IconData? icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: onPressed == null
+            ? const LinearGradient(colors: [Colors.grey, Colors.blueGrey])
+            : aniGradient,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: const [
+          BoxShadow(color: Color(0x449B6CFF), blurRadius: 24, spreadRadius: -5),
+        ],
+      ),
+      child: ElevatedButton.icon(
+        onPressed: onPressed,
+        icon: icon == null ? const SizedBox.shrink() : Icon(icon, size: 19),
+        label: Text(label),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          foregroundColor: Colors.white,
+          minimumSize: const Size.fromHeight(54),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class SegmentedGlass extends StatelessWidget {
+  const SegmentedGlass({
+    super.key,
+    required this.labels,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final List<String> labels;
+  final int selected;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: const Color(0x80141725),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AniColors.border),
+      ),
+      child: Row(
+        children: List.generate(labels.length, (index) {
+          final active = index == selected;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => onSelected(index),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  gradient: active ? aniGradient : null,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: active
+                      ? const [
+                          BoxShadow(color: Color(0x449B6CFF), blurRadius: 12),
+                        ]
+                      : null,
+                ),
+                child: Text(
+                  labels[index],
+                  style: TextStyle(
+                    color: active ? Colors.white : AniColors.mutedText,
+                    fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+}
+
+class FeaturePill extends StatelessWidget {
+  const FeaturePill({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: .28)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 13),
+          const SizedBox(width: 5),
+          Text(label, style: const TextStyle(fontSize: 11)),
+        ],
+      ),
+    );
+  }
+}
+
+class FloatingNav extends StatelessWidget {
+  const FloatingNav({
+    super.key,
+    required this.selectedIndex,
+    required this.onSelected,
+  });
+
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    const items = [
+      (Icons.home_outlined, 'Home'),
+      (Icons.history_rounded, 'History'),
+      (Icons.tune_rounded, 'Settings'),
+    ];
+    return SafeArea(
+      minimum: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+          child: Container(
+            height: 72,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xE0141725),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: AniColors.border),
+            ),
+            child: Row(
+              children: List.generate(items.length, (index) {
+                final active = index == selectedIndex;
+                return Expanded(
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(17),
+                    onTap: () => onSelected(index),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 220),
+                      decoration: BoxDecoration(
+                        gradient: active ? aniGradient : null,
+                        borderRadius: BorderRadius.circular(17),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            items[index].$1,
+                            color: active ? Colors.white : AniColors.mutedText,
+                            size: 21,
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            items[index].$2,
+                            style: TextStyle(
+                              color: active
+                                  ? Colors.white
+                                  : AniColors.mutedText,
+                              fontSize: 10,
+                              fontWeight: active
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
+  const GlassAppBar({super.key, required this.title, this.trailing});
+
+  final String title;
+  final Widget? trailing;
+
+  @override
+  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
+
+  @override
+  Widget build(BuildContext context) {
+    return AppBar(
+      backgroundColor: AniColors.background.withValues(alpha: .78),
+      surfaceTintColor: Colors.transparent,
+      centerTitle: true,
+      title: Text(
+        title,
+        style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+      ),
+      actions: trailing == null ? null : [trailing!, const SizedBox(width: 8)],
+    );
+  }
+}
+
+class BottomAction extends StatelessWidget {
+  const BottomAction({
+    super.key,
+    required this.label,
+    required this.note,
+    required this.onPressed,
+  });
+
+  final String label;
+  final String note;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+        child: SafeArea(
+          top: false,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
+            color: AniColors.background.withValues(alpha: .82),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                GradientButton(
+                  label: label,
+                  icon: Icons.auto_awesome_rounded,
+                  onPressed: onPressed,
+                ),
+                const SizedBox(height: 7),
+                Text(
+                  note,
+                  style: const TextStyle(
+                    color: AniColors.mutedText,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class TuningSlider extends StatelessWidget {
+  const TuningSlider({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String label;
+  final double value;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Text(label),
+              const Spacer(),
+              Text(
+                '${(value * 100).round()}',
+                style: const TextStyle(
+                  color: AniColors.lavender,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          Slider(value: value, onChanged: onChanged),
+        ],
+      ),
+    );
+  }
+}
+
+class Metadata extends StatelessWidget {
+  const Metadata({
+    super.key,
+    required this.label,
+    required this.value,
+    this.alignEnd = false,
+  });
+
+  final String label;
+  final String value;
+  final bool alignEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: alignEnd
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: AniColors.mutedText,
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            letterSpacing: .8,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+        ),
+      ],
+    );
+  }
+}
+
+class ControlLabel extends StatelessWidget {
+  const ControlLabel(this.text, {super.key});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Text(
+    text,
+    style: const TextStyle(
+      color: AniColors.mutedText,
+      fontSize: 11,
+      fontWeight: FontWeight.w700,
+      letterSpacing: 1.2,
+    ),
+  );
+}
+
+class SectionTitle extends StatelessWidget {
+  const SectionTitle({super.key, required this.title, this.action});
+  final String title;
+  final String? action;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Text(title, style: Theme.of(context).textTheme.titleMedium),
+      const Spacer(),
+      if (action != null)
+        Text(
+          action!,
+          style: const TextStyle(color: AniColors.lavender, fontSize: 12),
+        ),
+    ],
+  );
+}
+
+class HistoryTile extends StatelessWidget {
+  const HistoryTile(this.enhancement, {super.key});
+  final Enhancement enhancement;
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassCard(
+      padding: const EdgeInsets.all(10),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Image.file(
+              File(enhancement.outputPath),
+              width: 62,
+              height: 62,
+              fit: BoxFit.cover,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Enhanced image',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${enhancement.outputWidth} × ${enhancement.outputHeight} • ${enhancement.scale}×',
+                  style: const TextStyle(
+                    color: AniColors.mutedText,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_right_rounded, color: AniColors.mutedText),
+        ],
+      ),
+    );
+  }
+}
+
+class EmptyHistory extends StatelessWidget {
+  const EmptyHistory({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.auto_awesome_motion_outlined,
+            color: AniColors.purple,
+            size: 48,
+          ),
+          const SizedBox(height: 18),
+          Text(
+            'Your enhanced media will appear here.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 7),
+          const Text(
+            'Everything stays on your device.',
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class SettingRow extends StatelessWidget {
+  const SettingRow({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.value,
+  });
+  final IconData icon;
+  final String title;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(icon, color: AniColors.lavender),
+      title: Text(title),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (value.isNotEmpty)
+            Text(value, style: const TextStyle(color: AniColors.mutedText)),
+          const SizedBox(width: 4),
+          const Icon(
+            Icons.chevron_right_rounded,
+            color: AniColors.mutedText,
+            size: 19,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ScanLine extends StatelessWidget {
+  const ScanLine({super.key, required this.progress});
+  final double progress;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (_, constraints) => Stack(
+        children: [
+          Positioned(
+            top: constraints.maxHeight * progress,
+            left: 0,
+            right: 0,
+            child: Container(
+              height: 3,
+              decoration: const BoxDecoration(
+                gradient: aniGradient,
+                boxShadow: [
+                  BoxShadow(
+                    color: AniColors.blue,
+                    blurRadius: 16,
+                    spreadRadius: 3,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class CompareBadge extends StatelessWidget {
+  const CompareBadge(this.label, {super.key});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          color: const Color(0x99070A12),
+          child: Text(
+            label,
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+          ),
+        ),
+      ),
+    );
+  }
+}
