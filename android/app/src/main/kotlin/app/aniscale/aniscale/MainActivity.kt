@@ -32,12 +32,27 @@ class MainActivity : FlutterActivity() {
         }
 
         @JvmStatic external fun nativeInitialize(assetManager: AssetManager): Boolean
+        @JvmStatic external fun nativeUsesVulkan(): Boolean
+        @JvmStatic external fun nativeCancel()
         @JvmStatic external fun nativeUpscale(
             bitmap: Bitmap,
             engine: String,
             scale: Int,
             tileSize: Int,
+            sharpening: Float,
         ): Bitmap?
+        @JvmStatic external fun nativeFillYuv420(
+            bitmap: Bitmap,
+            yBuffer: ByteBuffer,
+            yRowStride: Int,
+            yPixelStride: Int,
+            uBuffer: ByteBuffer,
+            uRowStride: Int,
+            uPixelStride: Int,
+            vBuffer: ByteBuffer,
+            vRowStride: Int,
+            vPixelStride: Int,
+        )
     }
 
     private val worker = Executors.newSingleThreadExecutor()
@@ -72,6 +87,7 @@ class MainActivity : FlutterActivity() {
         when (call.method) {
             "cancel" -> {
                 cancelled.set(true)
+                nativeCancel()
                 result.success(null)
             }
             "upscaleImage" -> runImage(call, result)
@@ -90,7 +106,12 @@ class MainActivity : FlutterActivity() {
         val scale = call.argument<Int>("scale") ?: 2
         val tileSize = call.argument<Int>("tileSize") ?: 192
         val outputFormat = call.argument<String>("outputFormat") ?: "automatic"
-        if (path.isNullOrBlank() || scale !in listOf(2, 4)) {
+        val engine = call.argument<String>("engine") ?: "fusion"
+        val performance = call.argument<Int>("performance") ?: 0
+        val sharpness = call.argument<Double>("sharpness") ?: 0.2
+        val detail = call.argument<Double>("detail") ?: 0.5
+        if (path.isNullOrBlank() || scale !in listOf(2, 4) ||
+            engine !in listOf("fusion", "render", "turbo")) {
             result.error("bad_arguments", "Invalid image path or scale.", null)
             return
         }
@@ -103,18 +124,39 @@ class MainActivity : FlutterActivity() {
                     ?: error("This image could not be decoded.")
                 val originalWidth = decoded.width
                 val originalHeight = decoded.height
-                val source = fitInput(decoded, scale, 18_000_000, null)
+                val outputPixelLimit = when (performance) {
+                    1 -> 18_000_000
+                    2 -> 8_847_360
+                    else -> 12_000_000
+                }
+                val requestedEdgeLimit = if (performance == 2) 1600 else null
+                val inputEdgeLimit = if (nativeUsesVulkan()) {
+                    requestedEdgeLimit
+                } else {
+                    min(requestedEdgeLimit ?: 1024, 1024)
+                }
+                val source = fitInput(decoded, scale, outputPixelLimit, inputEdgeLimit)
                 if (source !== decoded) decoded.recycle()
                 val input = source.copy(Bitmap.Config.ARGB_8888, false)
                 if (source !== input) source.recycle()
                 emitProgress(0.12)
-                val enhanced = nativeUpscale(input, "fusion", scale, tileSize)
-                    ?: error("AniScale Fusion could not process this image.")
+                val sharpenAmount = (sharpness * 0.8 + detail * 0.22)
+                    .coerceIn(0.08, 0.42).toFloat()
+                val enhanced = nativeUpscale(
+                    input,
+                    engine,
+                    scale,
+                    tileSize,
+                    sharpenAmount,
+                ) ?: error("The selected AniScale model returned no image.")
                 input.recycle()
                 check(!cancelled.get()) { "Image upscaling was cancelled." }
                 val usePng = outputFormat == "png" || outputFormat == "automatic"
                 val extension = if (usePng) "png" else "jpg"
-                val output = File(cacheDir, "aniscale_${System.currentTimeMillis()}.$extension")
+                val output = File(
+                    enhancementDirectory(),
+                    "aniscale_${System.currentTimeMillis()}.$extension",
+                )
                 FileOutputStream(output).use { stream ->
                     enhanced.compress(
                         if (usePng) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG,
@@ -128,7 +170,7 @@ class MainActivity : FlutterActivity() {
                     "originalHeight" to originalHeight,
                     "outputWidth" to enhanced.width,
                     "outputHeight" to enhanced.height,
-                    "engine" to "AniScale Fusion (Android ncnn Vulkan)",
+                    "engine" to "${engineLabel(engine)} (${backendLabel()})",
                 )
                 enhanced.recycle()
                 emitProgress(1.0)
@@ -188,18 +230,26 @@ class MainActivity : FlutterActivity() {
             .coerceAtLeast(1)
         val first = frameAt(retriever, 0, fps)
             ?: error("The first video frame could not be decoded.")
-        val maxInputEdge = when {
-            engine == "turbo" -> 1080
-            efficient -> 720
-            else -> 1080
+        val sourceWidth = first.width
+        val sourceHeight = first.height
+        val target = fitOutput(sourceWidth, sourceHeight, scale)
+        val outputWidth = target.first
+        val outputHeight = target.second
+        val maxInputEdge = if (!nativeUsesVulkan()) {
+            if (engine == "turbo") 480 else 384
+        } else when (engine) {
+            "turbo" -> if (efficient) 720 else 960
+            "render" -> if (efficient) 640 else 896
+            else -> if (efficient) 768 else 960
         }
         val fittedFirst = fitInput(first, scale, 8_847_360, maxInputEdge)
         if (fittedFirst !== first) first.recycle()
         val inputWidth = fittedFirst.width
         val inputHeight = fittedFirst.height
-        val outputWidth = inputWidth * scale
-        val outputHeight = inputHeight * scale
-        val output = File(cacheDir, "aniscale_video_${System.currentTimeMillis()}.mp4")
+        val output = File(
+            enhancementDirectory(),
+            "aniscale_video_${System.currentTimeMillis()}.mp4",
+        )
         if (output.exists()) output.delete()
 
         val audioExtractor = MediaExtractor()
@@ -252,11 +302,31 @@ class MainActivity : FlutterActivity() {
                 }
                 val rgba = fitted.copy(Bitmap.Config.ARGB_8888, false)
                 fitted.recycle()
-                val enhanced = nativeUpscale(rgba, engine, scale, tileSize)
+                val modelSharpness = when (engine) {
+                    "render" -> 0.18f
+                    "turbo" -> 0.22f
+                    else -> 0.28f
+                }
+                val enhanced = nativeUpscale(
+                    rgba,
+                    engine,
+                    scale,
+                    tileSize,
+                    modelSharpness,
+                )
                     ?: error("The selected AniScale model failed on frame ${frameIndex + 1}.")
                 rgba.recycle()
-                queueFrame(encoder, enhanced, frameIndex, fps, muxer, muxState, audioFormat)
-                enhanced.recycle()
+                val outputFrame = if (
+                    enhanced.width == outputWidth && enhanced.height == outputHeight
+                ) {
+                    enhanced
+                } else {
+                    Bitmap.createScaledBitmap(enhanced, outputWidth, outputHeight, true).also {
+                        enhanced.recycle()
+                    }
+                }
+                queueFrame(encoder, outputFrame, frameIndex, fps, muxer, muxState, audioFormat)
+                outputFrame.recycle()
                 emitProgress(0.02 + (frameIndex + 1).toDouble() / frameCount * 0.92)
             }
             queueEndOfStream(encoder, frameCount, fps, muxer, muxState, audioFormat)
@@ -282,18 +352,42 @@ class MainActivity : FlutterActivity() {
         }
         check(!cancelled.get()) { "Video upscaling was cancelled." }
         emitProgress(1.0)
-        val label = when (engine) {
-            "render" -> "AniScale Render"
-            "turbo" -> "AniScale Turbo"
-            else -> "AniScale Fusion"
-        }
         return hashMapOf(
             "path" to output.absolutePath,
+            "originalWidth" to sourceWidth,
+            "originalHeight" to sourceHeight,
             "outputWidth" to outputWidth,
             "outputHeight" to outputHeight,
             "durationSeconds" to durationMs / 1000.0,
-            "engine" to "$label (Android ncnn Vulkan)",
+            "engine" to "${engineLabel(engine)} (${backendLabel()})",
         )
+    }
+
+    private fun enhancementDirectory(): File = File(filesDir, "enhancements").apply {
+        check(exists() || mkdirs()) { "AniScale could not create its local history folder." }
+    }
+
+    private fun backendLabel(): String = if (nativeUsesVulkan()) {
+        "Android ncnn Vulkan FP16"
+    } else {
+        "Android ncnn CPU"
+    }
+
+    private fun engineLabel(engine: String): String = when (engine) {
+        "render" -> "AniScale Render"
+        "turbo" -> "AniScale Turbo"
+        else -> "AniScale Fusion"
+    }
+
+    private fun fitOutput(width: Int, height: Int, scale: Int): Pair<Int, Int> {
+        val requestedWidth = width * scale
+        val requestedHeight = height * scale
+        val edgeRatio = 3840.0 / max(requestedWidth, requestedHeight)
+        val pixelRatio = sqrt(8_847_360.0 / (requestedWidth.toDouble() * requestedHeight))
+        val ratio = min(1.0, min(edgeRatio, pixelRatio))
+        val outputWidth = max(2, ((requestedWidth * ratio).roundToInt() / 2) * 2)
+        val outputHeight = max(2, ((requestedHeight * ratio).roundToInt() / 2) * 2)
+        return outputWidth to outputHeight
     }
 
     private fun frameAt(
@@ -433,40 +527,21 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun fillYuv420(bitmap: Bitmap, image: android.media.Image) {
-        val width = bitmap.width
-        val height = bitmap.height
-        val pixels = IntArray(width * height)
-        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
         val yPlane = image.planes[0]
         val uPlane = image.planes[1]
         val vPlane = image.planes[2]
-        for (y in 0 until height) {
-            for (x in 0 until width) {
-                val color = pixels[y * width + x]
-                val red = color shr 16 and 0xff
-                val green = color shr 8 and 0xff
-                val blue = color and 0xff
-                val luma = ((66 * red + 129 * green + 25 * blue + 128) shr 8) + 16
-                yPlane.buffer.put(
-                    y * yPlane.rowStride + x * yPlane.pixelStride,
-                    luma.coerceIn(0, 255).toByte(),
-                )
-                if (x % 2 == 0 && y % 2 == 0) {
-                    val u = ((-38 * red - 74 * green + 112 * blue + 128) shr 8) + 128
-                    val v = ((112 * red - 94 * green - 18 * blue + 128) shr 8) + 128
-                    val uvX = x / 2
-                    val uvY = y / 2
-                    uPlane.buffer.put(
-                        uvY * uPlane.rowStride + uvX * uPlane.pixelStride,
-                        u.coerceIn(0, 255).toByte(),
-                    )
-                    vPlane.buffer.put(
-                        uvY * vPlane.rowStride + uvX * vPlane.pixelStride,
-                        v.coerceIn(0, 255).toByte(),
-                    )
-                }
-            }
-        }
+        nativeFillYuv420(
+            bitmap,
+            yPlane.buffer,
+            yPlane.rowStride,
+            yPlane.pixelStride,
+            uPlane.buffer,
+            uPlane.rowStride,
+            uPlane.pixelStride,
+            vPlane.buffer,
+            vPlane.rowStride,
+            vPlane.pixelStride,
+        )
     }
 
     private fun copyAudio(

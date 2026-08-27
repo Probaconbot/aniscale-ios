@@ -4,7 +4,7 @@ AniScale is a private, offline-first image and video enhancer for iPhone and And
 
 ## Current build
 
-- Stable black-and-white Flutter interface without native platform-view overlays during transitions
+- Shared premium purple-blue glass interface, responsive navigation, spacing, and controls on iOS and Android
 - Custom AniScale launcher icon and in-app logo on iOS and Android
 - Image picker for PNG, JPG, and WebP
 - Local 2× and 4× AniScale Fusion image upscaling through Core ML with automatic
@@ -12,7 +12,7 @@ AniScale is a private, offline-first image and video enhancer for iPhone and And
 - Local 2× and 4× video enhancement with AniScale Fusion for anime/stylized 3D, the separate heavy
   AniScale Render model for general 3D, and compact AniScale Turbo for lower heat, with progress,
   cancellation, original audio, automatic encoder-safe 4K fitting, and Efficient and Maximum modes
-- Processing, before/after comparison, local history, settings, save, and share flows
+- Processing, before/after comparison, persistent image/video history, reopen, delete, playback, settings, save, and share flows
 - Local upscaling never uploads media; no account or watermark
 - Optional Groq vision planning: attach an image and describe the result, then review a structured
   cleanup/detail/color recipe before the local engine applies it
@@ -31,7 +31,10 @@ are fitted into an encoder-safe 4K canvas.
 Android uses ncnn with Vulkan acceleration and three bundled neural video models: AniScale Fusion
 for anime and stylized 3D, AniScale Render for general 3D, and compact AniScale Turbo for faster,
 lower-heat processing. Frames are decoded and encoded with Android media APIs and original audio is
-muxed into the local result. The same native Fusion runtime now handles Android image upscaling.
+muxed into the local result. Android keeps only the selected model resident, uses FP16 Vulkan where
+supported, performs frame-to-YUV conversion in native code, and chooses engine-specific working
+resolutions while preserving an encoder-safe full export size. Fusion, Render, and Turbo are also
+selectable for Android image upscaling.
 
 ## Run
 

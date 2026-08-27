@@ -57,6 +57,11 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         let detail = (arguments["detail"] as? NSNumber)?.doubleValue ?? 0.5
         let colorFidelity = (arguments["colorFidelity"] as? NSNumber)?.doubleValue ?? 0.9
         let outputFormat = arguments["outputFormat"] as? String ?? "automatic"
+        let engine = arguments["engine"] as? String ?? "fusion"
+        guard engine == "fusion" || engine == "render" || engine == "turbo" else {
+          result(FlutterError(code: "bad_arguments", message: "Unknown image engine.", details: nil))
+          return
+        }
         let requestedTileSize = arguments["tileSize"] as? Int ?? 256
         let tileSize = [128, 192, 256].contains(requestedTileSize) ? requestedTileSize : 256
         let preserveMetadata = arguments["preserveMetadata"] as? Bool ?? true
@@ -73,7 +78,8 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
               colorFidelity: colorFidelity,
               outputFormat: outputFormat,
               tileSize: tileSize,
-              preserveMetadata: preserveMetadata
+              preserveMetadata: preserveMetadata,
+              engine: engine
             )
             DispatchQueue.main.async { result(response) }
           } catch let error as EngineError {
@@ -157,7 +163,8 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     colorFidelity: Double,
     outputFormat: String,
     tileSize: Int,
-    preserveMetadata: Bool
+    preserveMetadata: Bool,
+    engine: String
   ) throws -> [String: Any] {
     guard let image = UIImage(contentsOfFile: path) else {
       throw EngineError("decode_failed", "This image could not be decoded.")
@@ -178,6 +185,10 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       outputFormat: outputFormat,
       tileSize: tileSize,
       metadata: metadata,
+      inferenceModel: engine == "render" ? renderModel : (engine == "turbo" ? turboModel : fusionModel),
+      engineLabel: engine == "render"
+        ? "AniScale Render"
+        : (engine == "turbo" ? "AniScale Turbo" : "AniScale Fusion"),
       tileProgress: { [weak self] value in self?.emitProgress(value) }
     )
   }
@@ -568,6 +579,8 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     emitProgress(1)
     return [
       "path": finalURL.path,
+      "originalWidth": sourceWidth,
+      "originalHeight": sourceHeight,
       "outputWidth": outputWidth,
       "outputHeight": outputHeight,
       "durationSeconds": durationSeconds,

@@ -26,6 +26,8 @@ class UpscaleRequest {
     this.outputFormat = 'automatic',
     this.tileSize = 256,
     this.preserveMetadata = true,
+    this.engine = 'fusion',
+    this.performance = 0,
   });
 
   final String path;
@@ -38,6 +40,8 @@ class UpscaleRequest {
   final String outputFormat;
   final int tileSize;
   final bool preserveMetadata;
+  final String engine;
+  final int performance;
 }
 
 class UpscaleResult {
@@ -61,6 +65,8 @@ class UpscaleResult {
 class VideoUpscaleResult {
   const VideoUpscaleResult({
     required this.path,
+    required this.originalWidth,
+    required this.originalHeight,
     required this.outputWidth,
     required this.outputHeight,
     required this.durationSeconds,
@@ -68,6 +74,8 @@ class VideoUpscaleResult {
   });
 
   final String path;
+  final int originalWidth;
+  final int originalHeight;
   final int outputWidth;
   final int outputHeight;
   final double durationSeconds;
@@ -117,6 +125,12 @@ Future<VideoUpscaleResult> upscaleVideoLocally({
   }
   return VideoUpscaleResult(
     path: response['path'] as String,
+    originalWidth:
+        response['originalWidth'] as int? ??
+        (response['outputWidth'] as int) ~/ scale,
+    originalHeight:
+        response['originalHeight'] as int? ??
+        (response['outputHeight'] as int) ~/ scale,
     outputWidth: response['outputWidth'] as int,
     outputHeight: response['outputHeight'] as int,
     durationSeconds: (response['durationSeconds'] as num).toDouble(),
@@ -138,6 +152,8 @@ Future<UpscaleResult> _upscaleWithNativeAI(UpscaleRequest request) async {
       'outputFormat': request.outputFormat,
       'tileSize': request.tileSize,
       'preserveMetadata': request.preserveMetadata,
+      'engine': request.engine,
+      'performance': request.performance,
     },
   );
   if (response == null) {

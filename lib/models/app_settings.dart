@@ -30,7 +30,8 @@ class AppSettings {
   final bool reduceMotion;
 
   String get tileSizeLabel => tileSize == 0 ? 'Automatic' : '$tileSize px';
-  int get engineTileSize => tileSize == 0 ? 256 : tileSize;
+  // Zero lets each native engine choose the fastest safe tile for the device.
+  int get engineTileSize => tileSize;
 
   AppSettings copyWith({
     OutputFormat? outputFormat,

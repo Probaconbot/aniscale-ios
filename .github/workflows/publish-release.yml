@@ -10,7 +10,7 @@ on:
       version:
         description: Release version without the v prefix
         required: true
-        default: 1.8.0
+        default: 1.9.0
         type: string
 
 permissions:
@@ -58,9 +58,9 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           cat > release-notes.md <<EOF
-          ## AniScale ${VERSION} — all engines on Android and iOS
+          ## AniScale ${VERSION} — faster Android AI and working history
 
-          This release replaces the Android video placeholder with a real, local video-enhancement pipeline and ships the same three selectable AniScale modes on Android and iPhone.
+          This release fixes Android model-memory failures, reduces processing overhead, sharpens video output, and makes image and video history persistent and reopenable.
 
           ### Video engines
 
@@ -70,10 +70,18 @@ jobs:
 
           ### Android
 
-          - Real-ESRGAN inference through ncnn with Vulkan acceleration and CPU fallback.
-          - Fusion, Render, Turbo 2×, and Turbo 4× model files are bundled in the APK.
-          - Video frames are processed locally, encoded to H.264, and remuxed with the source audio.
-          - Image upscaling now uses the native AI engine instead of cubic resizing.
+          - Only the selected model is kept in memory, preventing the previous Fusion failure on memory-constrained devices.
+          - FP16 Vulkan acceleration is enabled where supported, with a bounded CPU fallback.
+          - Turbo uses larger automatic GPU tiles and native 2×/4× models.
+          - Video uses engine-specific AI working resolutions, native YUV conversion, edge refinement, full encoder-safe export dimensions, and original-audio remuxing.
+          - Fusion, Render, and Turbo are selectable for images as well as video.
+
+          ### Interface and history
+
+          - Shared premium purple-blue glass styling and edge-to-edge layout on Android and iOS.
+          - Image and video history persists across launches.
+          - History entries can be filtered, reopened, played, shared, saved, or deleted.
+          - Settings, About, model information, licences, and clear-history controls are functional.
 
           ### iPhone
 

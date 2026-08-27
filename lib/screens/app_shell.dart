@@ -9,10 +9,12 @@ import 'package:gal/gal.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:video_player/video_player.dart';
 
 import '../models/app_settings.dart';
 import '../models/enhancement.dart';
 import '../services/upscale_service.dart';
+import '../services/history_service.dart';
 import '../theme/app_theme.dart';
 
 class AppShell extends StatefulWidget {
@@ -30,8 +32,20 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
-    AppSettings.load().then((settings) {
-      if (mounted) setState(() => _settings = settings);
+    _restoreState();
+  }
+
+  Future<void> _restoreState() async {
+    final values = await Future.wait<dynamic>([
+      AppSettings.load(),
+      HistoryService.load(),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _settings = values[0] as AppSettings;
+      _history
+        ..clear()
+        ..addAll(values[1] as List<Enhancement>);
     });
   }
 
@@ -40,9 +54,23 @@ class _AppShellState extends State<AppShell> {
     unawaited(settings.save());
   }
 
-  void _addEnhancement(Enhancement enhancement) {
+  void _addEnhancement(Enhancement enhancement) async {
     if (!_settings.saveHistory) return;
-    setState(() => _history.insert(0, enhancement));
+    final durable = await HistoryService.persist(enhancement);
+    if (!mounted) return;
+    setState(() => _history.insert(0, durable));
+    await HistoryService.save(_history);
+  }
+
+  void _deleteEnhancement(Enhancement enhancement) async {
+    setState(() => _history.remove(enhancement));
+    await HistoryService.delete(enhancement);
+    await HistoryService.save(_history);
+  }
+
+  void _clearHistory() async {
+    setState(_history.clear);
+    await HistoryService.clear();
   }
 
   @override
@@ -51,13 +79,14 @@ class _AppShellState extends State<AppShell> {
       HomeScreen(
         history: _history,
         onOpenSettings: () => setState(() => _tab = 3),
+        onOpenHistory: () => setState(() => _tab = 1),
         onEnhanced: _addEnhancement,
         settings: _settings,
       ),
-      HistoryScreen(history: _history),
+      HistoryScreen(history: _history, onDelete: _deleteEnhancement),
       GroqAssistantScreen(onEnhanced: _addEnhancement, settings: _settings),
       SettingsScreen(
-        onClearHistory: () => setState(_history.clear),
+        onClearHistory: _clearHistory,
         settings: _settings,
         onSettingsChanged: _updateSettings,
       ),
@@ -88,12 +117,14 @@ class HomeScreen extends StatefulWidget {
     super.key,
     required this.history,
     required this.onOpenSettings,
+    required this.onOpenHistory,
     required this.onEnhanced,
     required this.settings,
   });
 
   final List<Enhancement> history;
   final VoidCallback onOpenSettings;
+  final VoidCallback onOpenHistory;
   final ValueChanged<Enhancement> onEnhanced;
   final AppSettings settings;
 
@@ -117,6 +148,7 @@ class _HomeScreenState extends State<HomeScreen> {
             builder: (_) => VideoSelectedScreen(
               inputPath: file.path,
               settings: widget.settings,
+              onEnhanced: widget.onEnhanced,
             ),
           ),
         );
@@ -211,9 +243,20 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               if (widget.history.isNotEmpty) ...[
                 const SizedBox(height: 30),
-                const SectionTitle(title: 'Recent', action: 'See all'),
+                SectionTitle(
+                  title: 'Recent',
+                  action: 'See all',
+                  onAction: widget.onOpenHistory,
+                ),
                 const SizedBox(height: 12),
-                ...widget.history.take(2).map(HistoryTile.new),
+                ...widget.history
+                    .take(2)
+                    .map(
+                      (item) => HistoryTile(
+                        item,
+                        onTap: () => openEnhancement(context, item),
+                      ),
+                    ),
               ],
             ],
           ),
@@ -228,10 +271,12 @@ class VideoSelectedScreen extends StatefulWidget {
     super.key,
     required this.inputPath,
     required this.settings,
+    required this.onEnhanced,
   });
 
   final String inputPath;
   final AppSettings settings;
+  final ValueChanged<Enhancement> onEnhanced;
 
   @override
   State<VideoSelectedScreen> createState() => _VideoSelectedScreenState();
@@ -406,6 +451,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                     efficient: _performance == 0,
                     tileSize: widget.settings.engineTileSize,
                     engine: _engine.name,
+                    onEnhanced: widget.onEnhanced,
                   ),
                 ),
               )
@@ -423,6 +469,7 @@ class VideoProcessingScreen extends StatefulWidget {
     required this.efficient,
     required this.tileSize,
     required this.engine,
+    required this.onEnhanced,
   });
 
   final String inputPath;
@@ -430,6 +477,7 @@ class VideoProcessingScreen extends StatefulWidget {
   final bool efficient;
   final int tileSize;
   final String engine;
+  final ValueChanged<Enhancement> onEnhanced;
 
   @override
   State<VideoProcessingScreen> createState() => _VideoProcessingScreenState();
@@ -461,6 +509,21 @@ class _VideoProcessingScreenState extends State<VideoProcessingScreen> {
         engine: widget.engine,
       );
       if (!mounted || _cancelled) return;
+      widget.onEnhanced(
+        Enhancement(
+          originalPath: widget.inputPath,
+          outputPath: result.path,
+          scale: widget.scale,
+          createdAt: DateTime.now(),
+          originalWidth: result.originalWidth,
+          originalHeight: result.originalHeight,
+          engine: result.engine,
+          actualOutputWidth: result.outputWidth,
+          actualOutputHeight: result.outputHeight,
+          isVideo: true,
+          durationSeconds: result.durationSeconds,
+        ),
+      );
       await Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(
           builder: (_) => VideoResultScreen(result: result),
@@ -576,6 +639,24 @@ class VideoResultScreen extends StatefulWidget {
 
 class _VideoResultScreenState extends State<VideoResultScreen> {
   bool _saving = false;
+  late final VideoPlayerController _controller;
+  late final Future<void> _initializing;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.file(File(widget.result.path));
+    _initializing = _controller.initialize().then((_) {
+      _controller.setLooping(true);
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   Future<void> _save() async {
     setState(() => _saving = true);
@@ -636,6 +717,68 @@ class _VideoResultScreenState extends State<VideoResultScreen> {
               ),
               const SizedBox(height: 24),
               LiquidGlassSurface(
+                borderRadius: 24,
+                padding: const EdgeInsets.all(8),
+                child: FutureBuilder<void>(
+                  future: _initializing,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState != ConnectionState.done ||
+                        !_controller.value.isInitialized) {
+                      return const AspectRatio(
+                        aspectRatio: 16 / 9,
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+                    return Column(
+                      children: [
+                        AspectRatio(
+                          aspectRatio: _controller.value.aspectRatio,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(18),
+                                child: VideoPlayer(_controller),
+                              ),
+                              Center(
+                                child: IconButton.filled(
+                                  tooltip: _controller.value.isPlaying
+                                      ? 'Pause'
+                                      : 'Play',
+                                  onPressed: () {
+                                    setState(() {
+                                      _controller.value.isPlaying
+                                          ? _controller.pause()
+                                          : _controller.play();
+                                    });
+                                  },
+                                  icon: Icon(
+                                    _controller.value.isPlaying
+                                        ? Icons.pause_rounded
+                                        : Icons.play_arrow_rounded,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        VideoProgressIndicator(
+                          _controller,
+                          allowScrubbing: true,
+                          padding: const EdgeInsets.only(top: 8),
+                          colors: const VideoProgressColors(
+                            playedColor: AniColors.purple,
+                            bufferedColor: Color(0x665B65A8),
+                            backgroundColor: Color(0x332D3350),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+              LiquidGlassSurface(
                 borderRadius: 26,
                 padding: const EdgeInsets.all(20),
                 child: Column(
@@ -646,7 +789,10 @@ class _VideoResultScreenState extends State<VideoResultScreen> {
                       size: 56,
                     ),
                     const SizedBox(height: 14),
-                    Text('${result.outputWidth} × ${result.outputHeight}'),
+                    Text(
+                      '${result.originalWidth} × ${result.originalHeight}  →  '
+                      '${result.outputWidth} × ${result.outputHeight}',
+                    ),
                     const SizedBox(height: 6),
                     Text(
                       '${result.durationSeconds.toStringAsFixed(1)} seconds',
@@ -699,6 +845,7 @@ class EditorScreen extends StatefulWidget {
 class _EditorScreenState extends State<EditorScreen> {
   int _scale = 2;
   bool _transparency = true;
+  _VideoEngine _engine = _VideoEngine.fusion;
 
   void _start() {
     Navigator.of(context).push(
@@ -712,6 +859,7 @@ class _EditorScreenState extends State<EditorScreen> {
           tileSize: widget.settings.engineTileSize,
           performance: widget.settings.performance,
           preserveMetadata: widget.settings.preserveMetadata,
+          engine: _engine.name,
         ),
       ),
     );
@@ -727,6 +875,7 @@ class _EditorScreenState extends State<EditorScreen> {
           onPressed: () => setState(() {
             _scale = 2;
             _transparency = true;
+            _engine = _VideoEngine.fusion;
           }),
           child: const Text('Reset'),
         ),
@@ -789,24 +938,27 @@ class _EditorScreenState extends State<EditorScreen> {
                     setState(() => _scale = index == 0 ? 2 : 4),
               ),
               const SizedBox(height: 22),
-              const ControlLabel('STYLE'),
+              const ControlLabel('AI ENGINE'),
               const SizedBox(height: 9),
-              const GlassCard(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    Icons.auto_awesome_rounded,
-                    color: AniColors.purple,
-                  ),
-                  title: Text('Anime & Illustration AI'),
-                  subtitle: Text(
-                    'AniScale Fusion automatically restores detail and cleans edges.',
-                  ),
-                  trailing: Icon(
-                    Icons.check_circle_rounded,
-                    color: AniColors.success,
-                  ),
+              SegmentedGlass(
+                labels: const ['Fusion', 'Render', 'Turbo'],
+                selected: _engine.index,
+                onSelected: (index) =>
+                    setState(() => _engine = _VideoEngine.values[index]),
+              ),
+              const SizedBox(height: 9),
+              Text(
+                switch (_engine) {
+                  _VideoEngine.fusion =>
+                    'Anime and illustrations with faithful edge recovery.',
+                  _VideoEngine.render => 'Photos, CGI, and rendered textures with restrained cleanup.',
+                  _VideoEngine.turbo =>
+                    'Compact 2×/4× model for the fastest, coolest result.',
+                },
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AniColors.mutedText,
+                  fontSize: 11,
                 ),
               ),
               const SizedBox(height: 18),
@@ -860,6 +1012,7 @@ class ProcessingScreen extends StatefulWidget {
     this.tileSize = 256,
     this.performance = 0,
     this.preserveMetadata = true,
+    this.engine = 'fusion',
   });
 
   final String inputPath;
@@ -874,6 +1027,7 @@ class ProcessingScreen extends StatefulWidget {
   final int tileSize;
   final int performance;
   final bool preserveMetadata;
+  final String engine;
 
   @override
   State<ProcessingScreen> createState() => _ProcessingScreenState();
@@ -938,6 +1092,8 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
           outputFormat: widget.outputFormat,
           tileSize: widget.tileSize,
           preserveMetadata: widget.preserveMetadata,
+          engine: widget.engine,
+          performance: widget.performance,
         ),
       );
       if (!mounted || _cancelled) return;
@@ -1290,13 +1446,64 @@ class _ResultScreenState extends State<ResultScreen> {
   }
 }
 
-class HistoryScreen extends StatelessWidget {
-  const HistoryScreen({super.key, required this.history});
+void openEnhancement(BuildContext context, Enhancement enhancement) {
+  if (!File(enhancement.outputPath).existsSync()) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('This local result is no longer available.'),
+      ),
+    );
+    return;
+  }
+  if (enhancement.isVideo) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => VideoResultScreen(
+          result: VideoUpscaleResult(
+            path: enhancement.outputPath,
+            originalWidth: enhancement.originalWidth,
+            originalHeight: enhancement.originalHeight,
+            outputWidth: enhancement.outputWidth,
+            outputHeight: enhancement.outputHeight,
+            durationSeconds: enhancement.durationSeconds ?? 0,
+            engine: enhancement.engine,
+          ),
+        ),
+      ),
+    );
+    return;
+  }
+  Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => ResultScreen(enhancement: enhancement),
+    ),
+  );
+}
+
+class HistoryScreen extends StatefulWidget {
+  const HistoryScreen({
+    super.key,
+    required this.history,
+    required this.onDelete,
+  });
 
   final List<Enhancement> history;
+  final ValueChanged<Enhancement> onDelete;
+
+  @override
+  State<HistoryScreen> createState() => _HistoryScreenState();
+}
+
+class _HistoryScreenState extends State<HistoryScreen> {
+  int _filter = 0;
 
   @override
   Widget build(BuildContext context) {
+    final visible = widget.history.where((item) {
+      if (_filter == 1) return !item.isVideo;
+      if (_filter == 2) return item.isVideo;
+      return true;
+    }).toList();
     return Padding(
       padding: const EdgeInsets.fromLTRB(22, 22, 22, 120),
       child: Column(
@@ -1305,15 +1512,28 @@ class HistoryScreen extends StatelessWidget {
           Text('History', style: Theme.of(context).textTheme.displaySmall),
           const SizedBox(height: 8),
           const Text('Your enhancements stay on this device.'),
-          const SizedBox(height: 24),
-          if (history.isEmpty)
+          const SizedBox(height: 18),
+          SegmentedGlass(
+            labels: const ['All', 'Images', 'Videos'],
+            selected: _filter,
+            onSelected: (value) => setState(() => _filter = value),
+          ),
+          const SizedBox(height: 18),
+          if (visible.isEmpty)
             const Expanded(child: EmptyHistory())
           else
             Expanded(
               child: ListView.separated(
-                itemCount: history.length,
+                itemCount: visible.length,
                 separatorBuilder: (_, _) => const SizedBox(height: 10),
-                itemBuilder: (_, index) => HistoryTile(history[index]),
+                itemBuilder: (_, index) {
+                  final item = visible[index];
+                  return HistoryTile(
+                    item,
+                    onTap: () => openEnhancement(context, item),
+                    onDelete: () => widget.onDelete(item),
+                  );
+                },
               ),
             ),
         ],
@@ -1811,7 +2031,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  String _version = '1.8.0';
+  String _version = '1.9.0';
 
   @override
   void initState() {
@@ -1873,7 +2093,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ? 'Fastest; uses the most working memory.'
                       : tile == 192
                       ? 'Balanced manual tile size.'
-                      : 'AniScale chooses the recommended 256 px tile.',
+                      : 'AniScale chooses the fastest safe tile for the selected engine and device.',
                 ),
                 trailing: tile == widget.settings.tileSize
                     ? const Icon(Icons.check_rounded)
@@ -1971,7 +2191,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   color: AniColors.error,
                 ),
                 title: const Text('Clear history'),
-                onTap: () {
+                onTap: () async {
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Clear local history?'),
+                      content: const Text(
+                        'Saved AniScale previews and history entries will be removed from this device.',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: const Text('Cancel'),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          child: const Text('Clear'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirmed != true || !context.mounted) return;
                   widget.onClearHistory();
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Local history cleared.')),
@@ -2001,6 +2241,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 icon: Icons.info_outline_rounded,
                 title: 'About AniScale',
                 value: _version,
+                onTap: () => showAboutDialog(
+                  context: context,
+                  applicationName: 'AniScale',
+                  applicationVersion: _version,
+                  applicationLegalese:
+                      'Free, private image and video enhancement.',
+                ),
               ),
               const Divider(color: AniColors.border, height: 1),
               SettingRow(
@@ -2011,12 +2258,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     : Platform.isAndroid
                     ? 'Fusion + Render + Turbo (ncnn)'
                     : 'Mobile resampler',
+                onTap: () => showModalBottomSheet<void>(
+                  context: context,
+                  builder: (context) => const SafeArea(
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'AniScale engines',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          SizedBox(height: 14),
+                          Text('Fusion — anime and stylized 3D quality.'),
+                          SizedBox(height: 8),
+                          Text('Render — photos, CGI, and rendered textures.'),
+                          SizedBox(height: 8),
+                          Text('Turbo — compact native 2×/4× processing.'),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               ),
               const Divider(color: AniColors.border, height: 1),
-              const SettingRow(
+              SettingRow(
                 icon: Icons.description_outlined,
                 title: 'Open-source licences',
                 value: '',
+                onTap: () => showLicensePage(
+                  context: context,
+                  applicationName: 'AniScale',
+                  applicationVersion: _version,
+                ),
               ),
             ],
           ),
@@ -2039,7 +2318,7 @@ class AmbientBackground extends StatelessWidget {
         gradient: RadialGradient(
           center: Alignment(-.7, -1),
           radius: 1.35,
-          colors: [Color(0x2BFFFFFF), Color(0xFF0B0C0F), AniColors.background],
+          colors: [Color(0x409B6CFF), Color(0xFF0B1020), AniColors.background],
           stops: [0, .46, 1],
         ),
       ),
@@ -2353,7 +2632,7 @@ class GradientButton extends StatelessWidget {
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.transparent,
           shadowColor: Colors.transparent,
-          foregroundColor: Colors.black,
+          foregroundColor: Colors.white,
           minimumSize: const Size.fromHeight(54),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(18),
@@ -2383,7 +2662,7 @@ class SegmentedGlass extends StatelessWidget {
       padding: const EdgeInsets.all(4),
       tint: const Color(0xE0101114),
       child: SizedBox(
-        height: 36,
+        height: 44,
         child: Row(
           children: List.generate(labels.length, (index) {
             final active = index == selected;
@@ -2413,7 +2692,7 @@ class SegmentedGlass extends StatelessWidget {
                   child: Text(
                     labels[index],
                     style: TextStyle(
-                      color: active ? Colors.black : AniColors.mutedText,
+                      color: active ? Colors.white : AniColors.mutedText,
                       fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                       fontSize: 13,
                     ),
@@ -2520,14 +2799,14 @@ class FloatingNav extends StatelessWidget {
                       children: [
                         Icon(
                           items[index].$1,
-                          color: active ? Colors.black : AniColors.mutedText,
+                          color: active ? Colors.white : AniColors.mutedText,
                           size: 21,
                         ),
                         const SizedBox(height: 3),
                         Text(
                           items[index].$2,
                           style: TextStyle(
-                            color: active ? Colors.black : AniColors.mutedText,
+                            color: active ? Colors.white : AniColors.mutedText,
                             fontSize: 10,
                             fontWeight: active
                                 ? FontWeight.w700
@@ -2727,9 +3006,15 @@ class ControlLabel extends StatelessWidget {
 }
 
 class SectionTitle extends StatelessWidget {
-  const SectionTitle({super.key, required this.title, this.action});
+  const SectionTitle({
+    super.key,
+    required this.title,
+    this.action,
+    this.onAction,
+  });
   final String title;
   final String? action;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) => Row(
@@ -2737,56 +3022,95 @@ class SectionTitle extends StatelessWidget {
       Text(title, style: Theme.of(context).textTheme.titleMedium),
       const Spacer(),
       if (action != null)
-        Text(
-          action!,
-          style: const TextStyle(color: AniColors.lavender, fontSize: 12),
+        TextButton(
+          onPressed: onAction,
+          child: Text(
+            action!,
+            style: const TextStyle(color: AniColors.lavender, fontSize: 12),
+          ),
         ),
     ],
   );
 }
 
 class HistoryTile extends StatelessWidget {
-  const HistoryTile(this.enhancement, {super.key});
+  const HistoryTile(this.enhancement, {super.key, this.onTap, this.onDelete});
   final Enhancement enhancement;
+  final VoidCallback? onTap;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
     return GlassCard(
-      padding: const EdgeInsets.all(10),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: Image.file(
-              File(enhancement.outputPath),
-              width: 62,
-              height: 62,
-              fit: BoxFit.cover,
-              cacheWidth: 180,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Enhanced image',
-                  style: TextStyle(fontWeight: FontWeight.w600),
+      padding: EdgeInsets.zero,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: SizedBox(
+                  width: 62,
+                  height: 62,
+                  child: enhancement.isVideo
+                      ? const ColoredBox(
+                          color: Color(0xFF171A28),
+                          child: Icon(
+                            Icons.play_circle_fill_rounded,
+                            color: AniColors.blue,
+                          ),
+                        )
+                      : Image.file(
+                          File(enhancement.outputPath),
+                          fit: BoxFit.cover,
+                          cacheWidth: 180,
+                          errorBuilder: (_, _, _) => const ColoredBox(
+                            color: Color(0xFF171A28),
+                            child: Icon(Icons.broken_image_outlined),
+                          ),
+                        ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  '${enhancement.outputWidth} × ${enhancement.outputHeight} • ${enhancement.scale}×',
-                  style: const TextStyle(
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      enhancement.isVideo ? 'Enhanced video' : 'Enhanced image',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${enhancement.outputWidth} × ${enhancement.outputHeight} • ${enhancement.scale}×',
+                      style: const TextStyle(
+                        color: AniColors.mutedText,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (onDelete != null)
+                IconButton(
+                  tooltip: 'Delete local result',
+                  onPressed: onDelete,
+                  icon: const Icon(
+                    Icons.delete_outline_rounded,
                     color: AniColors.mutedText,
-                    fontSize: 12,
                   ),
+                )
+              else
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  color: AniColors.mutedText,
                 ),
-              ],
-            ),
+            ],
           ),
-          const Icon(Icons.chevron_right_rounded, color: AniColors.mutedText),
-        ],
+        ),
       ),
     );
   }
