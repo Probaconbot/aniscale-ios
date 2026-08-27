@@ -71,6 +71,7 @@ class VideoUpscaleResult {
     required this.outputHeight,
     required this.durationSeconds,
     required this.engine,
+    this.benchmark = const {},
   });
 
   final String path;
@@ -80,6 +81,7 @@ class VideoUpscaleResult {
   final int outputHeight;
   final double durationSeconds;
   final String engine;
+  final Map<String, dynamic> benchmark;
 }
 
 Future<UpscaleResult> upscaleLocally(UpscaleRequest request) {
@@ -135,6 +137,9 @@ Future<VideoUpscaleResult> upscaleVideoLocally({
     outputHeight: response['outputHeight'] as int,
     durationSeconds: (response['durationSeconds'] as num).toDouble(),
     engine: response['engine'] as String? ?? 'AniScale Fusion',
+    benchmark: Map<String, dynamic>.from(
+      response['benchmark'] as Map? ?? const {},
+    ),
   );
 }
 

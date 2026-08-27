@@ -1,0 +1,48 @@
+{
+  "status": "pending_physical_device_run",
+  "variant": "FAST or QUALITY",
+  "device": {
+    "model": null,
+    "chip": null,
+    "ios": null,
+    "battery_percent_start": null,
+    "low_power_mode": false
+  },
+  "clip": {
+    "name": null,
+    "source_width": 854,
+    "source_height": 480,
+    "duration_seconds": 30,
+    "fps": null,
+    "codec": null,
+    "bitrate_kbps": null
+  },
+  "runtime": {
+    "processing_fps": null,
+    "seconds_per_video_minute": null,
+    "model_inference_mean_ms": null,
+    "model_inference_p50_ms": null,
+    "model_inference_p95_ms": null,
+    "cpu_utilization_percent": null,
+    "gpu_utilization_percent": null,
+    "neural_engine_utilization_percent": null,
+    "peak_resident_memory_mb": null,
+    "thermal_start": null,
+    "thermal_end": null
+  },
+  "quality": {
+    "psnr_db": null,
+    "ssim": null,
+    "lpips": null,
+    "sharpness_gain": null,
+    "local_contrast_gain": null,
+    "temporal_warp_error": null,
+    "flicker_p95": null,
+    "manual_identity_pass": null,
+    "manual_natural_skin_pass": null,
+    "manual_no_halo_pass": null,
+    "manual_temporal_stability_pass": null
+  },
+  "instruments_trace": null,
+  "notes": null
+}

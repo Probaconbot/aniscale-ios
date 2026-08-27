@@ -1,0 +1,36 @@
+{
+  "name": "AniScale Video FAST",
+  "architecture": "srvgg",
+  "num_blocks": 16,
+  "scale": 4,
+  "sequence_length": 5,
+  "hr_patch_size": 256,
+  "batch_size": 6,
+  "gradient_accumulation": 2,
+  "iterations": 180000,
+  "learning_rate": 0.0001,
+  "ema_decay": 0.999,
+  "loss": {
+    "charbonnier": 1.0,
+    "edge": 0.12,
+    "perceptual": 0.04,
+    "temporal": 0.28
+  },
+  "degradation": {
+    "codec_generations": [1, 2, 3],
+    "bitrates_kbps": [180, 350, 700, 1200],
+    "blur_sigma": [0.2, 1.8],
+    "motion_blur_probability": 0.35,
+    "noise_sigma": [0.0, 8.0],
+    "jpeg_quality": [28, 88],
+    "chroma_subsampling": "yuv420p",
+    "ringing_probability": 0.25,
+    "social_media_probability": 0.45
+  },
+  "coreml": {
+    "input_size": 266,
+    "precision": "float16",
+    "minimum_ios": 15,
+    "output_name": "AniScale_turbo_animevideo_266_fp16.mlpackage"
+  }
+}

@@ -18,11 +18,10 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
   private var progressSink: FlutterEventSink?
   private func loadModel(named resource: String) -> MLModel {
     let configuration = MLModelConfiguration()
-    if #available(iOS 16.0, *) {
-      configuration.computeUnits = .cpuAndNeuralEngine
-    } else {
-      configuration.computeUnits = .all
-    }
+    // Let Core ML specialize each graph for the fastest supported mix of CPU,
+    // GPU/Metal, and Neural Engine on the current iPhone. Excluding the GPU
+    // made some convolution-heavy graphs substantially slower.
+    configuration.computeUnits = .all
     guard let url = Bundle.main.url(
       forResource: resource,
       withExtension: "mlmodelc"
@@ -206,6 +205,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     metadata: CFDictionary? = nil,
     inferenceModel: MLModel? = nil,
     engineLabel: String = "AniScale Fusion",
+    encodeOutput: Bool = true,
     tileProgress: ((Double) -> Void)?
   ) throws -> [String: Any] {
     let originalWidth = Int(image.size.width * image.scale)
@@ -254,6 +254,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       dataType: .float32
     )
     var completed = 0
+    var tileInferenceMilliseconds: [Double] = []
 
     for (row, y0) in yStarts.enumerated() {
       for (column, x0) in xStarts.enumerated() {
@@ -272,7 +273,11 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           denoise: denoise
         )
         let provider = try MLDictionaryFeatureProvider(dictionary: ["input": inputArray])
+        let inferenceStarted = ProcessInfo.processInfo.systemUptime
         let prediction = try (inferenceModel ?? fusionModel).prediction(from: provider)
+        tileInferenceMilliseconds.append(
+          (ProcessInfo.processInfo.systemUptime - inferenceStarted) * 1_000
+        )
         guard
           let values = prediction.featureValue(for: "output")?.multiArrayValue
         else {
@@ -332,6 +337,19 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     ), let cgImage = context.makeImage() else {
       throw EngineError("encode_failed", "The enhanced image could not be assembled.")
     }
+    if !encodeOutput {
+      return [
+        "cgImage": cgImage,
+        "originalWidth": originalWidth,
+        "originalHeight": originalHeight,
+        "outputWidth": outputWidth,
+        "outputHeight": outputHeight,
+        "tileInferenceMilliseconds": tileInferenceMilliseconds,
+        "engine": memoryFitted
+          ? "\(engineLabel) (Memory-safe Core ML)"
+          : "\(engineLabel) (Core ML)"
+      ]
+    }
     let usePNG = outputFormat == "png" || (
       outputFormat == "automatic" && preserveTransparency && hasTransparency(source.pixels)
     )
@@ -366,6 +384,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       "originalHeight": originalHeight,
       "outputWidth": outputWidth,
       "outputHeight": outputHeight,
+      "tileInferenceMilliseconds": tileInferenceMilliseconds,
       "engine": memoryFitted
         ? "\(engineLabel) (Memory-safe Core ML)"
         : "\(engineLabel) (Core ML)"
@@ -379,6 +398,10 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     tileSize: Int,
     engine: String
   ) throws -> [String: Any] {
+    let benchmarkStarted = ProcessInfo.processInfo.systemUptime
+    let initialThermalState = thermalStateLabel()
+    var tileInferenceMilliseconds: [Double] = []
+    var processedFrames = 0
     let selectedModel = engine == "render" ? renderModel : (engine == "turbo" ? turboModel : fusionModel)
     let engineLabel = engine == "render"
       ? "AniScale Render"
@@ -525,21 +548,19 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           tileSize: tileSize,
           inferenceModel: selectedModel,
           engineLabel: engineLabel,
+          encodeOutput: false,
           tileProgress: { [weak self] tile in
             self?.emitProgress(min(0.92, frameStart + tile * frameStep))
           }
         )
-        guard let enhancedPath = enhanced["path"] as? String else {
+        if let frameInference = enhanced["tileInferenceMilliseconds"] as? [Double] {
+          tileInferenceMilliseconds.append(contentsOf: frameInference)
+        }
+        processedFrames += 1
+        guard let enhancedImage = enhanced["cgImage"] as? CGImage else {
           throw EngineError("video_frame_encode", "The AI engine returned no enhanced frame.")
         }
-        let enhancedURL = URL(fileURLWithPath: enhancedPath)
-        defer { try? FileManager.default.removeItem(at: enhancedURL) }
-        guard var enhancedFrame = CIImage(contentsOf: enhancedURL) else {
-          throw EngineError(
-            "video_frame_encode",
-            "An AI-enhanced frame could not be reopened."
-          )
-        }
+        var enhancedFrame = CIImage(cgImage: enhancedImage)
         let fitScale = min(
           CGFloat(outputWidth) / enhancedFrame.extent.width,
           CGFloat(outputHeight) / enhancedFrame.extent.height
@@ -577,6 +598,13 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     try preserveAudio(from: asset, processedVideoURL: silentURL, outputURL: finalURL)
     try? FileManager.default.removeItem(at: silentURL)
     emitProgress(1)
+    let processingSeconds = max(
+      ProcessInfo.processInfo.systemUptime - benchmarkStarted,
+      0.001
+    )
+    let meanInference = tileInferenceMilliseconds.isEmpty
+      ? 0
+      : tileInferenceMilliseconds.reduce(0, +) / Double(tileInferenceMilliseconds.count)
     return [
       "path": finalURL.path,
       "originalWidth": sourceWidth,
@@ -584,10 +612,40 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       "outputWidth": outputWidth,
       "outputHeight": outputHeight,
       "durationSeconds": durationSeconds,
+      "benchmark": [
+        "processedFrames": processedFrames,
+        "processingSeconds": processingSeconds,
+        "processingFps": Double(processedFrames) / processingSeconds,
+        "secondsPerVideoMinute": processingSeconds / durationSeconds * 60,
+        "modelInferenceMeanMs": meanInference,
+        "modelInferenceP50Ms": percentile(tileInferenceMilliseconds, 0.50),
+        "modelInferenceP95Ms": percentile(tileInferenceMilliseconds, 0.95),
+        "thermalStart": initialThermalState,
+        "thermalEnd": thermalStateLabel(),
+        "computeUnits": "Core ML all (CPU/GPU/Neural Engine selected per device)",
+        "utilizationNote": "Capture CPU, GPU, Neural Engine, and peak memory with Xcode Instruments on a physical iPhone."
+      ],
       "engine": efficient
         ? "\(engineLabel) (Efficient Core ML)"
         : "\(engineLabel) (Maximum Core ML)"
     ]
+  }
+
+  private func percentile(_ values: [Double], _ fraction: Double) -> Double {
+    guard !values.isEmpty else { return 0 }
+    let ordered = values.sorted()
+    let position = Int((Double(ordered.count - 1) * fraction).rounded())
+    return ordered[max(0, min(position, ordered.count - 1))]
+  }
+
+  private func thermalStateLabel() -> String {
+    switch ProcessInfo.processInfo.thermalState {
+    case .nominal: return "nominal"
+    case .fair: return "fair"
+    case .serious: return "serious"
+    case .critical: return "critical"
+    @unknown default: return "unknown"
+    }
   }
 
   private func preserveAudio(

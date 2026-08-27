@@ -777,6 +777,53 @@ class _VideoResultScreenState extends State<VideoResultScreen> {
                   },
                 ),
               ),
+              if (result.benchmark.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                LiquidGlassSurface(
+                  borderRadius: 24,
+                  padding: const EdgeInsets.all(18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'On-device performance',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 12),
+                      _BenchmarkRow(
+                        label: 'Processing speed',
+                        value:
+                            '${_number(result.benchmark['processingFps'], 2)} FPS',
+                      ),
+                      _BenchmarkRow(
+                        label: 'Per video minute',
+                        value:
+                            '${_number(result.benchmark['secondsPerVideoMinute'], 1)} sec',
+                      ),
+                      _BenchmarkRow(
+                        label: 'Core ML inference',
+                        value:
+                            '${_number(result.benchmark['modelInferenceMeanMs'], 1)} ms mean',
+                      ),
+                      _BenchmarkRow(
+                        label: 'Thermal state',
+                        value:
+                            '${result.benchmark['thermalStart'] ?? 'unknown'} → '
+                            '${result.benchmark['thermalEnd'] ?? 'unknown'}',
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'GPU, Neural Engine, CPU, and peak-memory percentages require an Instruments trace on a physical iPhone.',
+                        style: TextStyle(
+                          color: AniColors.mutedText,
+                          fontSize: 11,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               LiquidGlassSurface(
                 borderRadius: 26,
@@ -824,6 +871,32 @@ class _VideoResultScreenState extends State<VideoResultScreen> {
       ),
     );
   }
+
+  String _number(Object? value, int decimals) =>
+      value is num ? value.toStringAsFixed(decimals) : '—';
+}
+
+class _BenchmarkRow extends StatelessWidget {
+  const _BenchmarkRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(color: AniColors.secondaryText),
+          ),
+        ),
+        Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
+      ],
+    ),
+  );
 }
 
 class EditorScreen extends StatefulWidget {

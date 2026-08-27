@@ -13,6 +13,12 @@ jobs:
       - name: Check out AniScale
         uses: actions/checkout@v4
 
+      - name: Validate video training assets
+        shell: bash
+        run: |
+          python3 -m compileall -q training
+          python3 training/validate_assets.py
+
       - name: Install Flutter stable
         shell: bash
         run: |

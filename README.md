@@ -36,6 +36,15 @@ supported, performs frame-to-YUV conversion in native code, and chooses engine-s
 resolutions while preserving an encoder-safe full export size. Fusion, Render, and Turbo are also
 selectable for Android image upscaling.
 
+## Video model fine-tuning
+
+The reproducible [training pipeline](training/README.md) retains AniScale's existing Real-ESRGAN
+RRDB and AnimeVideo-v3 SRVGG architectures. It includes real multi-generation codec degradation,
+paired sequence loading, motion-aligned temporal loss, FAST/QUALITY configurations, perceptual and
+temporal checkpoint evaluation, Core ML FP16 export, the supplied visual acceptance reference, and
+a physical-iPhone benchmark schema. Fine-tuned weights and benchmark numbers are not claimed until
+training data, a CUDA run, and an Instruments trace on an actual iPhone have completed.
+
 ## Run
 
 Open this folder in VS Code and use the Flutter SDK installed at

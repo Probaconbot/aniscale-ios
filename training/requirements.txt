@@ -1,0 +1,8 @@
+torch==2.5.1
+torchvision==0.20.1
+opencv-python-headless==4.11.0.86
+numpy==1.26.4
+Pillow==11.1.0
+scikit-image==0.25.2
+lpips==0.1.4
+coremltools==8.1

@@ -1,0 +1,23 @@
+{
+  "name": "soft 480p to restored visual acceptance reference",
+  "image": "soft480p_to_restored_acceptance.png",
+  "sha256": "ca6536ff7d10580fe1178318d1a5a84dc7b70234ac8d9e251a2a00aa26422943",
+  "width": 942,
+  "height": 1018,
+  "panels": {
+    "input": {"x": 0, "y": 0, "width": 942, "height": 537},
+    "target": {"x": 0, "y": 538, "width": 942, "height": 480}
+  },
+  "usage": "Visual acceptance and checkpoint comparison only; not a training pair or pixel-aligned ground truth.",
+  "acceptance": {
+    "sharpness_gain_min": 1.15,
+    "local_contrast_gain_min": 1.03,
+    "temporal_warp_error_max": 0.035,
+    "temporal_flicker_p95_max": 0.055,
+    "notes": [
+      "Check face structure and skin manually at 100 percent zoom.",
+      "Check hair, armor, debris, and ground texture for stable recovery.",
+      "Reject halos, waxy skin, invented texture, excessive grain, or identity drift."
+    ]
+  }
+}

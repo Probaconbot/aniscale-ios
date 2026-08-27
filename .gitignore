@@ -38,6 +38,9 @@ migrate_working_dir/
 /ios/Runner/Models/*.mlpackage/
 /ios/Runner/Models/*.pth
 /RealESRGAN_*.zip
+/training/data/
+/training/runs/
+/training/reports/
 
 # Symbolication related
 app.*.symbols
