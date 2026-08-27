@@ -88,6 +88,7 @@ Future<VideoUpscaleResult> upscaleVideoLocally({
   required int scale,
   required bool efficient,
   required int tileSize,
+  required String engine,
 }) async {
   if (!Platform.isIOS) {
     throw UnsupportedError(
@@ -101,6 +102,7 @@ Future<VideoUpscaleResult> upscaleVideoLocally({
       'scale': scale,
       'efficient': efficient,
       'tileSize': tileSize,
+      'engine': engine,
     },
   );
   if (response == null) {
@@ -114,7 +116,7 @@ Future<VideoUpscaleResult> upscaleVideoLocally({
     outputWidth: response['outputWidth'] as int,
     outputHeight: response['outputHeight'] as int,
     durationSeconds: (response['durationSeconds'] as num).toDouble(),
-    engine: response['engine'] as String? ?? 'Real-ESRGAN Core ML',
+    engine: response['engine'] as String? ?? 'AniScale Fusion',
   );
 }
 

@@ -237,9 +237,12 @@ class VideoSelectedScreen extends StatefulWidget {
   State<VideoSelectedScreen> createState() => _VideoSelectedScreenState();
 }
 
+enum _VideoEngine { fusion, render }
+
 class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
   int _scale = 2;
   late int _performance;
+  _VideoEngine _engine = _VideoEngine.fusion;
 
   @override
   void initState() {
@@ -314,6 +317,26 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                 ),
               ),
               const SizedBox(height: 18),
+              const ControlLabel('VIDEO ENGINE'),
+              const SizedBox(height: 9),
+              SegmentedGlass(
+                labels: const ['Fusion', 'Render'],
+                selected: _engine.index,
+                onSelected: (index) =>
+                    setState(() => _engine = _VideoEngine.values[index]),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _engine == _VideoEngine.fusion
+                    ? 'AniScale Fusion — tuned for anime and stylized 3D, with a smaller neural model for better speed.'
+                    : 'AniScale Render — a heavier 23-block model for clean 3D surfaces, sharper geometry, and restrained noise.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AniColors.mutedText,
+                  fontSize: 11,
+                ),
+              ),
+              const SizedBox(height: 18),
               const ControlLabel('VIDEO UPSCALE'),
               const SizedBox(height: 9),
               SegmentedGlass(
@@ -351,13 +374,17 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                   ),
                   title: Text(
                     Platform.isIOS
-                        ? 'Real-ESRGAN video AI'
+                        ? _engine == _VideoEngine.fusion
+                              ? 'AniScale Fusion — Anime & 3D'
+                              : 'AniScale Render — 3D'
                         : 'Android video engine',
                   ),
                   subtitle: Text(
                     Platform.isIOS
-                        ? 'Anime and stylized 3D frames are cleaned and upscaled with Core ML. Original audio is preserved and oversized results fit a safe 4K output.'
-                        : 'Video enhancement is not available in this Android beta yet. Image enhancement and Assistant recipes are available.',
+                        ? _engine == _VideoEngine.fusion
+                              ? 'Anime and stylized 3D frames are cleaned with a faster Core ML model. Original audio is preserved and oversized results fit a safe 4K output.'
+                              : 'A separate, heavier general-image model cleans 3D surfaces and geometry. Original audio is preserved and oversized results fit a safe 4K output.'
+                        : 'Video enhancement is not available in this Android build yet. Image enhancement and Assistant recipes are available.',
                   ),
                 ),
               ),
@@ -382,6 +409,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                     scale: _scale,
                     efficient: _performance == 0,
                     tileSize: widget.settings.engineTileSize,
+                    engine: _engine.name,
                   ),
                 ),
               )
@@ -398,12 +426,14 @@ class VideoProcessingScreen extends StatefulWidget {
     required this.scale,
     required this.efficient,
     required this.tileSize,
+    required this.engine,
   });
 
   final String inputPath;
   final int scale;
   final bool efficient;
   final int tileSize;
+  final String engine;
 
   @override
   State<VideoProcessingScreen> createState() => _VideoProcessingScreenState();
@@ -432,6 +462,7 @@ class _VideoProcessingScreenState extends State<VideoProcessingScreen> {
         scale: widget.scale,
         efficient: widget.efficient,
         tileSize: widget.tileSize,
+        engine: widget.engine,
       );
       if (!mounted || _cancelled) return;
       await Navigator.of(context).pushReplacement(
@@ -774,7 +805,7 @@ class _EditorScreenState extends State<EditorScreen> {
                   ),
                   title: Text('Anime & Illustration AI'),
                   subtitle: Text(
-                    'Real-ESRGAN Anime 6B automatically restores detail and cleans edges.',
+                    'AniScale Fusion automatically restores detail and cleans edges.',
                   ),
                   trailing: Icon(
                     Icons.check_circle_rounded,
@@ -1376,7 +1407,53 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
       clean = clean.replaceFirst(RegExp(r'^```(?:json)?\s*'), '');
       clean = clean.replaceFirst(RegExp(r'\s*```$'), '');
     }
-    return jsonDecode(clean) as Map<String, dynamic>;
+    try {
+      return jsonDecode(clean) as Map<String, dynamic>;
+    } on FormatException {
+      // Vision models occasionally wrap an otherwise valid object in a short
+      // explanation. Recover that object instead of failing the request.
+      final start = clean.indexOf('{');
+      final end = clean.lastIndexOf('}');
+      if (start < 0 || end <= start) rethrow;
+      return jsonDecode(clean.substring(start, end + 1))
+          as Map<String, dynamic>;
+    }
+  }
+
+  _AssistantPlan _localFallbackPlan(String prompt) {
+    final request = prompt.toLowerCase();
+    final wantsFour =
+        request.contains('4x') ||
+        request.contains('4×') ||
+        request.contains('maximum') ||
+        request.contains('large');
+    final wantsCleanup =
+        request.contains('noise') ||
+        request.contains('grain') ||
+        request.contains('artifact') ||
+        request.contains('blurry') ||
+        request.contains('blur');
+    final wantsSharp =
+        request.contains('sharp') ||
+        request.contains('detail') ||
+        request.contains('clear');
+    return _AssistantPlan(
+      message: 'Cloud analysis was unavailable, so I prepared a conservative local recipe from your request. It keeps the image faithful and avoids heavy sharpening.',
+      scale: wantsFour ? 4 : 2,
+      denoise: wantsCleanup ? .38 : .2,
+      sharpness: wantsSharp ? .32 : .18,
+      detail: wantsSharp ? .62 : .5,
+      colorFidelity: .94,
+    );
+  }
+
+  void _showPlan(_AssistantPlan plan) {
+    _pendingPlan = plan;
+    _messages.add((
+      user: false,
+      text:
+          '${plan.message}\n\nRecipe: ${plan.scale}× · cleanup ${(plan.denoise * 100).round()}% · detail ${(plan.detail * 100).round()}% · sharpness ${(plan.sharpness * 100).round()}%',
+    ));
   }
 
   Future<void> _send() async {
@@ -1412,14 +1489,15 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
           ? await prepareVisionImage(selectedPath)
           : null;
       final requestBody = <String, dynamic>{
-        'model': hasImage ? 'qwen/qwen3.6-27b' : 'openai/gpt-oss-20b',
+        'model': hasImage ? 'qwen/qwen3.8-27b' : 'openai/gpt-oss-20b',
         'temperature': 0.25,
         'max_completion_tokens': 700,
+        if (hasImage) 'reasoning_effort': 'none',
         'messages': [
           {
             'role': 'system',
             'content': hasImage
-                ? 'You are the planning layer for AniScale, not the image engine. Inspect the image and translate the user request into conservative settings for the local Real-ESRGAN Anime 6B engine. Preserve identity, composition, natural texture, and color. Avoid hallucinated detail, halos, and plastic smoothing. Return ONLY one JSON object with exactly: message (short user-facing explanation), scale (2 or 4), denoise (0 to 1), sharpness (0 to 1), detail (0 to 1), colorFidelity (0 to 1).'
+                ? 'You are the planning layer for AniScale, not the image engine. Inspect the image and translate the user request into conservative settings for AniScale Fusion. Preserve identity, composition, natural texture, and color. Avoid hallucinated detail, halos, and plastic smoothing.'
                 : 'You are AniScale Assistant. Help users choose faithful image and video restoration settings. Prioritize artifact removal, natural texture, temporal stability, privacy, and honest limitations. Never claim that text AI performs the upscaling itself.',
           },
           if (!hasImage) ...history,
@@ -1435,7 +1513,41 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
               ],
             },
         ],
-        if (hasImage) 'response_format': {'type': 'json_object'},
+        if (hasImage)
+          'response_format': {
+            'type': 'json_schema',
+            'json_schema': {
+              'name': 'aniscale_recipe',
+              'strict': true,
+              'schema': {
+                'type': 'object',
+                'properties': {
+                  'message': {'type': 'string'},
+                  'scale': {
+                    'type': 'integer',
+                    'enum': [2, 4],
+                  },
+                  'denoise': {'type': 'number', 'minimum': 0, 'maximum': 1},
+                  'sharpness': {'type': 'number', 'minimum': 0, 'maximum': 1},
+                  'detail': {'type': 'number', 'minimum': 0, 'maximum': 1},
+                  'colorFidelity': {
+                    'type': 'number',
+                    'minimum': 0,
+                    'maximum': 1,
+                  },
+                },
+                'required': [
+                  'message',
+                  'scale',
+                  'denoise',
+                  'sharpness',
+                  'detail',
+                  'colorFidelity',
+                ],
+                'additionalProperties': false,
+              },
+            },
+          },
       };
       request.add(utf8.encode(jsonEncode(requestBody)));
       final response = await request.close();
@@ -1459,12 +1571,7 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
         if (hasImage) {
           final plan = _AssistantPlan.fromJson(_decodeJsonObject(content));
           setState(() {
-            _pendingPlan = plan;
-            _messages.add((
-              user: false,
-              text:
-                  '${plan.message}\n\nRecipe: ${plan.scale}× · cleanup ${(plan.denoise * 100).round()}% · detail ${(plan.detail * 100).round()}% · sharpness ${(plan.sharpness * 100).round()}%',
-            ));
+            _showPlan(plan);
           });
         } else {
           setState(() => _messages.add((user: false, text: content)));
@@ -1472,13 +1579,18 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
       }
     } catch (error) {
       if (mounted) {
-        setState(
-          () => _messages.add((
-            user: false,
-            text:
-                'Assistant request failed. Check the key and connection, then try again. ${error is HttpException ? error.message : ''}',
-          )),
-        );
+        if (selectedPath != null) {
+          final plan = _localFallbackPlan(prompt);
+          setState(() => _showPlan(plan));
+        } else {
+          setState(
+            () => _messages.add((
+              user: false,
+              text:
+                  'Assistant request failed. Check the key and connection, then try again. ${error is HttpException ? error.message : ''}',
+            )),
+          );
+        }
       }
     } finally {
       client.close(force: true);
@@ -1703,7 +1815,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  String _version = '1.6.0';
+  String _version = '1.7.0';
 
   @override
   void initState() {
@@ -1899,7 +2011,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 icon: Icons.memory_rounded,
                 title: 'Upscale engine',
                 value: Platform.isIOS
-                    ? 'Real-ESRGAN Core ML'
+                    ? 'AniScale Fusion + Render'
                     : 'Mobile resampler',
               ),
               const Divider(color: AniColors.border, height: 1),

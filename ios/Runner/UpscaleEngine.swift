@@ -16,7 +16,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
   private let lock = NSLock()
   private var cancelled = false
   private var progressSink: FlutterEventSink?
-  private lazy var model: MLModel = {
+  private func loadModel(named resource: String) -> MLModel {
     let configuration = MLModelConfiguration()
     if #available(iOS 16.0, *) {
       configuration.computeUnits = .cpuAndNeuralEngine
@@ -24,13 +24,16 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       configuration.computeUnits = .all
     }
     guard let url = Bundle.main.url(
-      forResource: "RealESRGAN_anime_6B_266_fp16",
+      forResource: resource,
       withExtension: "mlmodelc"
     ) else {
-      fatalError("AniScale AI model is missing from the app bundle")
+      fatalError("AniScale AI model \(resource) is missing from the app bundle")
     }
     return try! MLModel(contentsOf: url, configuration: configuration)
-  }()
+  }
+
+  private lazy var fusionModel = loadModel(named: "RealESRGAN_anime_6B_266_fp16")
+  private lazy var renderModel = loadModel(named: "RealESRGAN_render_x4plus_266_fp16")
 
   func register(with messenger: FlutterBinaryMessenger) {
     let methods = FlutterMethodChannel(name: Self.methodChannelName, binaryMessenger: messenger)
@@ -93,6 +96,11 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           return
         }
         let efficient = arguments["efficient"] as? Bool ?? true
+        let engine = arguments["engine"] as? String ?? "fusion"
+        guard engine == "fusion" || engine == "render" else {
+          result(FlutterError(code: "bad_arguments", message: "Unknown video engine.", details: nil))
+          return
+        }
         let requestedTileSize = arguments["tileSize"] as? Int ?? 256
         let tileSize = [128, 192, 256].contains(requestedTileSize) ? requestedTileSize : 256
         setCancelled(false)
@@ -102,7 +110,8 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
               path: path,
               scale: scale,
               efficient: efficient,
-              tileSize: tileSize
+              tileSize: tileSize,
+              engine: engine
             )
             DispatchQueue.main.async { result(response) }
           } catch let error as EngineError {
@@ -183,6 +192,8 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     outputFormat: String = "automatic",
     tileSize: Int = 256,
     metadata: CFDictionary? = nil,
+    inferenceModel: MLModel? = nil,
+    engineLabel: String = "AniScale Fusion",
     tileProgress: ((Double) -> Void)?
   ) throws -> [String: Any] {
     let originalWidth = Int(image.size.width * image.scale)
@@ -249,7 +260,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           denoise: denoise
         )
         let provider = try MLDictionaryFeatureProvider(dictionary: ["input": inputArray])
-        let prediction = try model.prediction(from: provider)
+        let prediction = try (inferenceModel ?? fusionModel).prediction(from: provider)
         guard
           let values = prediction.featureValue(for: "output")?.multiArrayValue
         else {
@@ -344,8 +355,8 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       "outputWidth": outputWidth,
       "outputHeight": outputHeight,
       "engine": memoryFitted
-        ? "Real-ESRGAN Anime 6B (Memory-safe Core ML)"
-        : "Real-ESRGAN Anime 6B (Core ML)"
+        ? "\(engineLabel) (Memory-safe Core ML)"
+        : "\(engineLabel) (Core ML)"
     ]
   }
 
@@ -353,8 +364,14 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     path: String,
     scale: Int,
     efficient: Bool,
-    tileSize: Int
+    tileSize: Int,
+    engine: String
   ) throws -> [String: Any] {
+    let selectedModel = engine == "render" ? renderModel : fusionModel
+    let engineLabel = engine == "render" ? "AniScale Render" : "AniScale Fusion"
+    let videoDenoise = engine == "render" ? 0.34 : 0.2
+    let videoSharpness = engine == "render" ? 0.34 : 0.26
+    let videoDetail = engine == "render" ? 0.68 : 0.6
     let sourceURL = URL(fileURLWithPath: path)
     let asset = AVAsset(url: sourceURL)
     guard let videoTrack = asset.tracks(withMediaType: .video).first else {
@@ -488,7 +505,12 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           image: UIImage(cgImage: frameImage),
           requestedScale: aiScale,
           preserveTransparency: false,
+          denoise: videoDenoise,
+          sharpness: videoSharpness,
+          detail: videoDetail,
           tileSize: tileSize,
+          inferenceModel: selectedModel,
+          engineLabel: engineLabel,
           tileProgress: { [weak self] tile in
             self?.emitProgress(min(0.92, frameStart + tile * frameStep))
           }
@@ -547,8 +569,8 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       "outputHeight": outputHeight,
       "durationSeconds": durationSeconds,
       "engine": efficient
-        ? "Real-ESRGAN Anime/3D (Efficient Core ML)"
-        : "Real-ESRGAN Anime/3D (Maximum Core ML)"
+        ? "\(engineLabel) (Efficient Core ML)"
+        : "\(engineLabel) (Maximum Core ML)"
     ]
   }
 

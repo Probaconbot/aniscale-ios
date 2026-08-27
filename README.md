@@ -8,10 +8,11 @@ enhancement currently available on iPhone.
 - Stable black-and-white Flutter interface without native platform-view overlays during transitions
 - Custom AniScale launcher icon and in-app logo on iOS and Android
 - Image picker for PNG, JPG, and WebP
-- Local 2× and 4× Real-ESRGAN Anime 6B image upscaling through Core ML with automatic
+- Local 2× and 4× AniScale Fusion image upscaling through Core ML with automatic
   memory-safe fitting for large camera images
-- Local 2× and 4× Real-ESRGAN video enhancement with progress, cancellation, original audio, and
-  automatic encoder-safe 4K fitting for oversized 4× outputs, plus Efficient and Maximum modes
+- Local 2× and 4× video enhancement with AniScale Fusion for anime/stylized 3D and the separate,
+  heavier AniScale Render model for general 3D, with progress, cancellation, original audio,
+  automatic encoder-safe 4K fitting, and Efficient and Maximum modes
 - Processing, before/after comparison, local history, settings, save, and share flows
 - Local upscaling never uploads media; no account or watermark
 - Optional Groq vision planning: attach an image and describe the result, then review a structured
@@ -21,11 +22,12 @@ enhancement currently available on iPhone.
 - Users enter their own Groq key and it remains in memory only for the current app session; prompts
   and a reduced preview are sent to Groq only after the user taps send
 
-The iOS image and video engines run a fixed-shape Core ML conversion of the official Real-ESRGAN
-anime 6B weights in overlapping tiles. Assistant recipes tune pre-model cleanup and faithful
-reconstruction without pretending that the language model edits pixels. Video frames are decoded
-with AVFoundation, cleaned by the neural model, re-encoded locally, and muxed with their original
-audio. Oversized results are fitted into an encoder-safe 4K canvas.
+The iOS engines run fixed-shape Core ML conversions of the official Real-ESRGAN anime 6B and
+general x4plus weights in overlapping tiles. Both downloads are checksum-verified during the
+build. Assistant recipes tune pre-model cleanup and faithful reconstruction without pretending
+that the language model edits pixels. Video frames are decoded with AVFoundation, cleaned by the
+selected neural model, re-encoded locally, and muxed with their original audio. Oversized results
+are fitted into an encoder-safe 4K canvas.
 
 The Android beta includes the same UI, assistant recipe workflow, settings, image selection,
 memory-safe 2×/4× output, saving, sharing, and history. It currently uses AniScale's mobile image

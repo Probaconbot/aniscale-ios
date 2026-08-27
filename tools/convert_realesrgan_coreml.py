@@ -1,4 +1,4 @@
-"""Convert the official Real-ESRGAN anime 6B weights for AniScale iOS.
+"""Convert the official Real-ESRGAN Fusion and Render weights for iOS.
 
 The generated model has a fixed 266x266 input: a 256px image tile plus
 10px reflected padding. AniScale stitches tiles on-device in Swift.
@@ -17,13 +17,32 @@ import torch.nn.functional as functional
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_DIR = ROOT / "ios" / "Runner" / "Models"
-WEIGHTS = MODEL_DIR / "RealESRGAN_x4plus_anime_6B.pth"
-OUTPUT = MODEL_DIR / "RealESRGAN_anime_6B_266_fp16.mlpackage"
-WEIGHTS_URL = (
-    "https://github.com/xinntao/Real-ESRGAN/releases/download/"
-    "v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth"
+MODELS = (
+    {
+        "name": "Fusion",
+        "weights": MODEL_DIR / "RealESRGAN_x4plus_anime_6B.pth",
+        "output": MODEL_DIR / "RealESRGAN_anime_6B_266_fp16.mlpackage",
+        "url": (
+            "https://github.com/xinntao/Real-ESRGAN/releases/download/"
+            "v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth"
+        ),
+        "sha256": "f872d837d3c90ed2e05227bed711af5671a6fd1c9f7d7e91c911a61f155e99da",
+        "blocks": 6,
+        "description": "4x anime and stylized 3D super-resolution",
+    },
+    {
+        "name": "Render",
+        "weights": MODEL_DIR / "RealESRGAN_x4plus.pth",
+        "output": MODEL_DIR / "RealESRGAN_render_x4plus_266_fp16.mlpackage",
+        "url": (
+            "https://github.com/xinntao/Real-ESRGAN/releases/download/"
+            "v0.1.0/RealESRGAN_x4plus.pth"
+        ),
+        "sha256": "4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1",
+        "blocks": 23,
+        "description": "4x general and 3D render super-resolution",
+    },
 )
-WEIGHTS_SHA256 = "f872d837d3c90ed2e05227bed711af5671a6fd1c9f7d7e91c911a61f155e99da"
 
 
 class ResidualDenseBlock(nn.Module):
@@ -62,12 +81,12 @@ class ResidualInResidualDenseBlock(nn.Module):
         return output * 0.2 + value
 
 
-class AnimeRRDBNet(nn.Module):
-    def __init__(self):
+class RRDBNet(nn.Module):
+    def __init__(self, blocks: int):
         super().__init__()
         self.conv_first = nn.Conv2d(3, 64, 3, 1, 1)
         self.body = nn.Sequential(
-            *[ResidualInResidualDenseBlock() for _ in range(6)]
+            *[ResidualInResidualDenseBlock() for _ in range(blocks)]
         )
         self.conv_body = nn.Conv2d(64, 64, 3, 1, 1)
         self.conv_up1 = nn.Conv2d(64, 64, 3, 1, 1)
@@ -90,21 +109,22 @@ class AnimeRRDBNet(nn.Module):
         return self.conv_last(functional.leaky_relu(self.conv_hr(features), 0.2))
 
 
-def main():
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    if OUTPUT.exists():
-        print(f"Core ML model already exists: {OUTPUT}")
+def convert_model(spec):
+    output = spec["output"]
+    weights = spec["weights"]
+    if output.exists():
+        print(f"Core ML model already exists: {output}")
         return
-    if not WEIGHTS.exists():
-        print("Downloading official Real-ESRGAN anime 6B weights...")
-        urlretrieve(WEIGHTS_URL, WEIGHTS)
-    digest = hashlib.sha256(WEIGHTS.read_bytes()).hexdigest()
-    if digest != WEIGHTS_SHA256:
-        WEIGHTS.unlink(missing_ok=True)
+    if not weights.exists():
+        print(f"Downloading official Real-ESRGAN {spec['name']} weights...")
+        urlretrieve(spec["url"], weights)
+    digest = hashlib.sha256(weights.read_bytes()).hexdigest()
+    if digest != spec["sha256"]:
+        weights.unlink(missing_ok=True)
         raise RuntimeError(f"Real-ESRGAN weights checksum mismatch: {digest}")
 
-    network = AnimeRRDBNet()
-    checkpoint = torch.load(WEIGHTS, map_location="cpu", weights_only=True)
+    network = RRDBNet(spec["blocks"])
+    checkpoint = torch.load(weights, map_location="cpu", weights_only=True)
     network.load_state_dict(checkpoint.get("params_ema", checkpoint), strict=True)
     network.eval()
 
@@ -122,9 +142,15 @@ def main():
     )
     model.author = "Xintao Wang et al.; iOS conversion for AniScale"
     model.license = "BSD-3-Clause"
-    model.short_description = "4x anime and illustration super-resolution"
-    model.save(OUTPUT)
-    print(f"Saved {OUTPUT}")
+    model.short_description = spec["description"]
+    model.save(output)
+    print(f"Saved {output}")
+
+
+def main():
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    for spec in MODELS:
+        convert_model(spec)
 
 
 if __name__ == "__main__":

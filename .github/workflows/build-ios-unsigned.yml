@@ -38,12 +38,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Restore converted anime model
+      - name: Restore converted AniScale models
         id: coreml-cache
         uses: actions/cache@v4
         with:
-          path: ios/Runner/Models/RealESRGAN_anime_6B_266_fp16.mlpackage
-          key: coreml-anime-6b-ios15-266-${{ hashFiles('tools/convert_realesrgan_coreml.py') }}
+          path: |
+            ios/Runner/Models/RealESRGAN_anime_6B_266_fp16.mlpackage
+            ios/Runner/Models/RealESRGAN_render_x4plus_266_fp16.mlpackage
+          key: coreml-fusion-render-ios15-266-${{ hashFiles('tools/convert_realesrgan_coreml.py') }}
 
       - name: Convert Real-ESRGAN for iPhone
         if: steps.coreml-cache.outputs.cache-hit != 'true'
@@ -55,7 +57,9 @@ jobs:
 
       - name: Verify Core ML model exists
         shell: bash
-        run: test -f ios/Runner/Models/RealESRGAN_anime_6B_266_fp16.mlpackage/Manifest.json
+        run: |
+          test -f ios/Runner/Models/RealESRGAN_anime_6B_266_fp16.mlpackage/Manifest.json
+          test -f ios/Runner/Models/RealESRGAN_render_x4plus_266_fp16.mlpackage/Manifest.json
 
       - name: Analyze project
         shell: bash
