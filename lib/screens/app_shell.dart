@@ -37,7 +37,7 @@ class _AppShellState extends State<AppShell> {
         onEnhanced: _addEnhancement,
       ),
       HistoryScreen(history: _history),
-      const GroqAssistantScreen(),
+      GroqAssistantScreen(onEnhanced: _addEnhancement),
       SettingsScreen(onClearHistory: () => setState(_history.clear)),
     ];
 
@@ -200,6 +200,7 @@ class VideoSelectedScreen extends StatefulWidget {
 
 class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
   int _scale = 2;
+  int _performance = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -277,6 +278,25 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                     setState(() => _scale = index == 0 ? 2 : 4),
               ),
               const SizedBox(height: 18),
+              const ControlLabel('AI PERFORMANCE'),
+              const SizedBox(height: 9),
+              SegmentedGlass(
+                labels: const ['Efficient', 'Maximum'],
+                selected: _performance,
+                onSelected: (index) => setState(() => _performance = index),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _performance == 0
+                    ? 'Recommended: lower heat and faster processing with a bounded AI working resolution.'
+                    : 'Full-resolution neural input. Slowest mode with higher memory and battery use.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AniColors.mutedText,
+                  fontSize: 11,
+                ),
+              ),
+              const SizedBox(height: 18),
               const GlassCard(
                 child: ListTile(
                   contentPadding: EdgeInsets.zero,
@@ -305,6 +325,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
             builder: (_) => VideoProcessingScreen(
               inputPath: widget.inputPath,
               scale: _scale,
+              efficient: _performance == 0,
             ),
           ),
         ),
@@ -318,10 +339,12 @@ class VideoProcessingScreen extends StatefulWidget {
     super.key,
     required this.inputPath,
     required this.scale,
+    required this.efficient,
   });
 
   final String inputPath;
   final int scale;
+  final bool efficient;
 
   @override
   State<VideoProcessingScreen> createState() => _VideoProcessingScreenState();
@@ -348,6 +371,7 @@ class _VideoProcessingScreenState extends State<VideoProcessingScreen> {
       final result = await upscaleVideoLocally(
         path: widget.inputPath,
         scale: widget.scale,
+        efficient: widget.efficient,
       );
       if (!mounted || _cancelled) return;
       await Navigator.of(context).pushReplacement(
@@ -631,6 +655,7 @@ class _EditorScreenState extends State<EditorScreen> {
                       child: Image.file(
                         File(widget.inputPath),
                         fit: BoxFit.contain,
+                        cacheWidth: 1200,
                       ),
                     ),
                   ),
@@ -726,12 +751,20 @@ class ProcessingScreen extends StatefulWidget {
     required this.scale,
     required this.preserveTransparency,
     required this.onEnhanced,
+    this.denoise = .2,
+    this.sharpness = .2,
+    this.detail = .5,
+    this.colorFidelity = .9,
   });
 
   final String inputPath;
   final int scale;
   final bool preserveTransparency;
   final ValueChanged<Enhancement> onEnhanced;
+  final double denoise;
+  final double sharpness;
+  final double detail;
+  final double colorFidelity;
 
   @override
   State<ProcessingScreen> createState() => _ProcessingScreenState();
@@ -779,6 +812,10 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
           path: widget.inputPath,
           scale: widget.scale,
           preserveTransparency: widget.preserveTransparency,
+          denoise: widget.denoise,
+          sharpness: widget.sharpness,
+          detail: widget.detail,
+          colorFidelity: widget.colorFidelity,
         ),
       );
       if (!mounted || _cancelled) return;
@@ -792,9 +829,11 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
         originalWidth: result.originalWidth,
         originalHeight: result.originalHeight,
         engine: result.engine,
+        actualOutputWidth: result.outputWidth,
+        actualOutputHeight: result.outputHeight,
       );
       widget.onEnhanced(enhancement);
-      await Future<void>.delayed(const Duration(milliseconds: 420));
+      await Future<void>.delayed(const Duration(milliseconds: 80));
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(
@@ -842,6 +881,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                           child: Image.file(
                             File(widget.inputPath),
                             fit: BoxFit.cover,
+                            cacheWidth: 1000,
                           ),
                         ),
                         Positioned.fill(child: ScanLine(progress: _progress)),
@@ -966,7 +1006,7 @@ class _ResultScreenState extends State<ResultScreen> {
                   ),
                   child: Padding(
                     padding: EdgeInsets.all(12),
-                    child: Icon(Icons.check_rounded, color: Colors.white),
+                    child: Icon(Icons.check_rounded, color: Colors.black),
                   ),
                 ),
               ),
@@ -1016,7 +1056,11 @@ class _ResultScreenState extends State<ResultScreen> {
                           child: Stack(
                             fit: StackFit.expand,
                             children: [
-                              Image.file(File(e.outputPath), fit: BoxFit.cover),
+                              Image.file(
+                                File(e.outputPath),
+                                fit: BoxFit.cover,
+                                cacheWidth: 1200,
+                              ),
                               Align(
                                 alignment: Alignment.centerLeft,
                                 widthFactor: _split,
@@ -1030,6 +1074,7 @@ class _ResultScreenState extends State<ResultScreen> {
                                       child: Image.file(
                                         File(e.originalPath),
                                         fit: BoxFit.cover,
+                                        cacheWidth: 1200,
                                       ),
                                     ),
                                   ),
@@ -1155,8 +1200,43 @@ class HistoryScreen extends StatelessWidget {
   }
 }
 
+class _AssistantPlan {
+  const _AssistantPlan({
+    required this.message,
+    required this.scale,
+    required this.denoise,
+    required this.sharpness,
+    required this.detail,
+    required this.colorFidelity,
+  });
+
+  factory _AssistantPlan.fromJson(Map<String, dynamic> json) {
+    double setting(String key, double fallback) =>
+        ((json[key] as num?)?.toDouble() ?? fallback).clamp(0, 1).toDouble();
+    return _AssistantPlan(
+      message:
+          json['message'] as String? ??
+          'I prepared a faithful restoration recipe for this image.',
+      scale: json['scale'] == 4 ? 4 : 2,
+      denoise: setting('denoise', .2),
+      sharpness: setting('sharpness', .2),
+      detail: setting('detail', .5),
+      colorFidelity: setting('colorFidelity', .9),
+    );
+  }
+
+  final String message;
+  final int scale;
+  final double denoise;
+  final double sharpness;
+  final double detail;
+  final double colorFidelity;
+}
+
 class GroqAssistantScreen extends StatefulWidget {
-  const GroqAssistantScreen({super.key});
+  const GroqAssistantScreen({super.key, required this.onEnhanced});
+
+  final ValueChanged<Enhancement> onEnhanced;
 
   @override
   State<GroqAssistantScreen> createState() => _GroqAssistantScreenState();
@@ -1166,9 +1246,12 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
   final _keyController = TextEditingController();
   final _promptController = TextEditingController();
   final _scrollController = ScrollController();
+  final _picker = ImagePicker();
   final List<({bool user, String text})> _messages = [];
   bool _sending = false;
   bool _showKey = false;
+  String? _selectedPath;
+  _AssistantPlan? _pendingPlan;
 
   @override
   void dispose() {
@@ -1178,13 +1261,33 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
     super.dispose();
   }
 
+  Future<void> _pickImage() async {
+    final file = await _picker.pickImage(source: ImageSource.gallery);
+    if (file == null || !mounted) return;
+    setState(() {
+      _selectedPath = file.path;
+      _pendingPlan = null;
+    });
+  }
+
+  Map<String, dynamic> _decodeJsonObject(String content) {
+    var clean = content.trim();
+    if (clean.startsWith('```')) {
+      clean = clean.replaceFirst(RegExp(r'^```(?:json)?\s*'), '');
+      clean = clean.replaceFirst(RegExp(r'\s*```$'), '');
+    }
+    return jsonDecode(clean) as Map<String, dynamic>;
+  }
+
   Future<void> _send() async {
     final key = _keyController.text.trim();
     final prompt = _promptController.text.trim();
     if (key.isEmpty || prompt.isEmpty || _sending) return;
+    final selectedPath = _selectedPath;
     setState(() {
       _messages.add((user: true, text: prompt));
       _sending = true;
+      _pendingPlan = null;
       _promptController.clear();
     });
 
@@ -1196,7 +1299,7 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
       request.headers.contentType = ContentType.json;
       request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $key');
       final history = _messages
-          .take(10)
+          .skip(_messages.length > 10 ? _messages.length - 10 : 0)
           .map(
             (message) => {
               'role': message.user ? 'user' : 'assistant',
@@ -1204,22 +1307,37 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
             },
           )
           .toList();
-      request.add(
-        utf8.encode(
-          jsonEncode({
-            'model': 'llama-3.1-8b-instant',
-            'temperature': 0.25,
-            'max_completion_tokens': 700,
-            'messages': [
-              {
-                'role': 'system',
-                'content': 'You are AniScale Assistant. Help users choose faithful image and video restoration settings. Prioritize artifact removal, natural texture, temporal stability, privacy, and honest limitations. Never claim that text AI performs the upscaling itself.',
-              },
-              ...history,
-            ],
-          }),
-        ),
-      );
+      final hasImage = selectedPath != null;
+      final visionImage = hasImage
+          ? await prepareVisionImage(selectedPath)
+          : null;
+      final requestBody = <String, dynamic>{
+        'model': hasImage ? 'qwen/qwen3.6-27b' : 'llama-3.1-8b-instant',
+        'temperature': 0.25,
+        'max_completion_tokens': 700,
+        'messages': [
+          {
+            'role': 'system',
+            'content': hasImage
+                ? 'You are the planning layer for AniScale, not the image engine. Inspect the image and translate the user request into conservative settings for the local Real-ESRGAN Anime 6B engine. Preserve identity, composition, natural texture, and color. Avoid hallucinated detail, halos, and plastic smoothing. Return ONLY one JSON object with exactly: message (short user-facing explanation), scale (2 or 4), denoise (0 to 1), sharpness (0 to 1), detail (0 to 1), colorFidelity (0 to 1).'
+                : 'You are AniScale Assistant. Help users choose faithful image and video restoration settings. Prioritize artifact removal, natural texture, temporal stability, privacy, and honest limitations. Never claim that text AI performs the upscaling itself.',
+          },
+          if (!hasImage) ...history,
+          if (hasImage)
+            {
+              'role': 'user',
+              'content': [
+                {'type': 'text', 'text': prompt},
+                {
+                  'type': 'image_url',
+                  'image_url': {'url': visionImage},
+                },
+              ],
+            },
+        ],
+        if (hasImage) 'response_format': {'type': 'json_object'},
+      };
+      request.add(utf8.encode(jsonEncode(requestBody)));
       final response = await request.close();
       final body = await utf8.decoder.bind(response).join();
       final decoded = jsonDecode(body) as Map<String, dynamic>;
@@ -1237,7 +1355,21 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
       if (content == null || content.trim().isEmpty) {
         throw const FormatException('Groq returned an empty response.');
       }
-      if (mounted) setState(() => _messages.add((user: false, text: content)));
+      if (mounted) {
+        if (hasImage) {
+          final plan = _AssistantPlan.fromJson(_decodeJsonObject(content));
+          setState(() {
+            _pendingPlan = plan;
+            _messages.add((
+              user: false,
+              text:
+                  '${plan.message}\n\nRecipe: ${plan.scale}× · cleanup ${(plan.denoise * 100).round()}% · detail ${(plan.detail * 100).round()}% · sharpness ${(plan.sharpness * 100).round()}%',
+            ));
+          });
+        } else {
+          setState(() => _messages.add((user: false, text: content)));
+        }
+      }
     } catch (error) {
       if (mounted) {
         setState(
@@ -1256,13 +1388,33 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
           if (_scrollController.hasClients) {
             _scrollController.animateTo(
               _scrollController.position.maxScrollExtent,
-              duration: const Duration(milliseconds: 240),
+              duration: const Duration(milliseconds: 140),
               curve: Curves.easeOut,
             );
           }
         });
       }
     }
+  }
+
+  Future<void> _applyPlan() async {
+    final path = _selectedPath;
+    final plan = _pendingPlan;
+    if (path == null || plan == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ProcessingScreen(
+          inputPath: path,
+          scale: plan.scale,
+          preserveTransparency: true,
+          denoise: plan.denoise,
+          sharpness: plan.sharpness,
+          detail: plan.detail,
+          colorFidelity: plan.colorFidelity,
+          onEnhanced: widget.onEnhanced,
+        ),
+      ),
+    );
   }
 
   @override
@@ -1274,7 +1426,9 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
         children: [
           Text('AI Assistant', style: Theme.of(context).textTheme.displaySmall),
           const SizedBox(height: 7),
-          const Text('Fast restoration guidance powered by Groq.'),
+          const Text(
+            'Describe the result. AniScale turns it into an engine recipe.',
+          ),
           const SizedBox(height: 18),
           TextField(
             controller: _keyController,
@@ -1295,6 +1449,45 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
               ),
             ),
           ),
+          if (_selectedPath != null) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 92,
+              child: GlassCard(
+                padding: const EdgeInsets.all(8),
+                child: Row(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.file(
+                        File(_selectedPath!),
+                        width: 76,
+                        height: 76,
+                        fit: BoxFit.cover,
+                        cacheWidth: 220,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Text(
+                        'Attached for analysis\nSent to Groq only when you tap send.',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: _sending
+                          ? null
+                          : () => setState(() {
+                              _selectedPath = null;
+                              _pendingPlan = null;
+                            }),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           Expanded(
             child: _messages.isEmpty
@@ -1337,9 +1530,23 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
                     },
                   ),
           ),
+          if (_pendingPlan != null) ...[
+            const SizedBox(height: 10),
+            GradientButton(
+              label: 'Apply Recipe with AniScale',
+              icon: Icons.auto_fix_high_rounded,
+              onPressed: _applyPlan,
+            ),
+          ],
           const SizedBox(height: 12),
           Row(
             children: [
+              IconButton.outlined(
+                onPressed: _sending ? null : _pickImage,
+                tooltip: 'Attach image',
+                icon: const Icon(Icons.add_photo_alternate_outlined),
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: TextField(
                   controller: _promptController,
@@ -1347,7 +1554,9 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
                   maxLines: 3,
                   textInputAction: TextInputAction.send,
                   onSubmitted: (_) => _send(),
-                  decoration: const InputDecoration(hintText: 'Ask AniScale…'),
+                  decoration: const InputDecoration(
+                    hintText: 'Describe the cleanup you want…',
+                  ),
                 ),
               ),
               const SizedBox(width: 10),
@@ -1403,7 +1612,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SettingRow(
                 icon: Icons.image_outlined,
                 title: 'Default format',
-                value: 'PNG',
+                value: 'Automatic',
               ),
               const Divider(color: AniColors.border, height: 1),
               SwitchListTile.adaptive(
@@ -1480,7 +1689,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             leading: Icon(Icons.shield_outlined, color: AniColors.success),
             title: Text('Private by design'),
             subtitle: Text(
-              'Images and videos stay on-device. Assistant prompts are sent to Groq only when you use the Assistant tab.',
+              'Upscaling stays on-device. Assistant prompts and an attached preview are sent to Groq only when you tap send.',
             ),
           ),
         ),
@@ -1584,7 +1793,7 @@ class LiquidGlassSurface extends StatelessWidget {
     this.borderRadius = 18,
     this.padding = EdgeInsets.zero,
     this.tint = const Color(0xD0101114),
-    this.blur = 22,
+    this.blur = 8,
   });
 
   final Widget child;
@@ -1691,7 +1900,7 @@ class LiquidGlassIconButton extends StatelessWidget {
     return LiquidGlassSurface(
       borderRadius: 15,
       tint: const Color(0xE0121316),
-      blur: 18,
+      blur: 8,
       child: Tooltip(
         message: tooltip ?? '',
         child: Material(
@@ -1882,7 +2091,7 @@ class SegmentedGlass extends StatelessWidget {
               child: GestureDetector(
                 onTap: () => onSelected(index),
                 child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 220),
+                  duration: const Duration(milliseconds: 140),
                   curve: Curves.easeOutCubic,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
@@ -1981,7 +2190,7 @@ class FloatingNav extends StatelessWidget {
                   borderRadius: BorderRadius.circular(17),
                   onTap: () => onSelected(index),
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 220),
+                    duration: const Duration(milliseconds: 140),
                     curve: Curves.easeOutCubic,
                     decoration: BoxDecoration(
                       gradient: active ? aniGradient : null,
@@ -2242,6 +2451,7 @@ class HistoryTile extends StatelessWidget {
               width: 62,
               height: 62,
               fit: BoxFit.cover,
+              cacheWidth: 180,
             ),
           ),
           const SizedBox(width: 12),

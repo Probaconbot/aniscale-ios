@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -17,11 +18,19 @@ class UpscaleRequest {
     required this.path,
     required this.scale,
     this.preserveTransparency = true,
+    this.denoise = .2,
+    this.sharpness = .2,
+    this.detail = .5,
+    this.colorFidelity = .9,
   });
 
   final String path;
   final int scale;
   final bool preserveTransparency;
+  final double denoise;
+  final double sharpness;
+  final double detail;
+  final double colorFidelity;
 }
 
 class UpscaleResult {
@@ -29,12 +38,16 @@ class UpscaleResult {
     required this.path,
     required this.originalWidth,
     required this.originalHeight,
+    required this.outputWidth,
+    required this.outputHeight,
     required this.engine,
   });
 
   final String path;
   final int originalWidth;
   final int originalHeight;
+  final int outputWidth;
+  final int outputHeight;
   final String engine;
 }
 
@@ -66,6 +79,7 @@ Future<void> cancelUpscale() async {
 Future<VideoUpscaleResult> upscaleVideoLocally({
   required String path,
   required int scale,
+  required bool efficient,
 }) async {
   if (!Platform.isIOS) {
     throw UnsupportedError(
@@ -74,7 +88,7 @@ Future<VideoUpscaleResult> upscaleVideoLocally({
   }
   final response = await _upscaleChannel.invokeMapMethod<String, dynamic>(
     'upscaleVideo',
-    {'path': path, 'scale': scale},
+    {'path': path, 'scale': scale, 'efficient': efficient},
   );
   if (response == null) {
     throw PlatformException(
@@ -98,6 +112,10 @@ Future<UpscaleResult> _upscaleWithCoreML(UpscaleRequest request) async {
       'path': request.path,
       'scale': request.scale,
       'preserveTransparency': request.preserveTransparency,
+      'denoise': request.denoise,
+      'sharpness': request.sharpness,
+      'detail': request.detail,
+      'colorFidelity': request.colorFidelity,
     },
   );
   if (response == null) {
@@ -110,8 +128,38 @@ Future<UpscaleResult> _upscaleWithCoreML(UpscaleRequest request) async {
     path: response['path'] as String,
     originalWidth: response['originalWidth'] as int,
     originalHeight: response['originalHeight'] as int,
+    outputWidth:
+        response['outputWidth'] as int? ??
+        (response['originalWidth'] as int) * request.scale,
+    outputHeight:
+        response['outputHeight'] as int? ??
+        (response['originalHeight'] as int) * request.scale,
     engine: response['engine'] as String? ?? 'Core ML',
   );
+}
+
+/// Produces a small JPEG data URL for vision analysis without decoding the
+/// full camera image on the UI isolate.
+Future<String> prepareVisionImage(String path) =>
+    compute(_prepareVisionImage, path);
+
+String _prepareVisionImage(String path) {
+  final bytes = File(path).readAsBytesSync();
+  var image = img.decodeImage(bytes);
+  if (image == null) {
+    throw const FormatException('This image format could not be decoded.');
+  }
+  image = img.bakeOrientation(image);
+  const maxEdge = 1024;
+  if (image.width > maxEdge || image.height > maxEdge) {
+    if (image.width >= image.height) {
+      image = img.copyResize(image, width: maxEdge);
+    } else {
+      image = img.copyResize(image, height: maxEdge);
+    }
+  }
+  final jpeg = img.encodeJpg(image, quality: 82);
+  return 'data:image/jpeg;base64,${base64Encode(jpeg)}';
 }
 
 Future<UpscaleResult> _resizeImage(UpscaleRequest request) async {
@@ -135,6 +183,8 @@ Future<UpscaleResult> _resizeImage(UpscaleRequest request) async {
     path: output.path,
     originalWidth: source.width,
     originalHeight: source.height,
+    outputWidth: resized.width,
+    outputHeight: resized.height,
     engine: 'High-quality cubic fallback',
   );
 }

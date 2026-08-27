@@ -19,7 +19,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
   private var progressSink: FlutterEventSink?
   private lazy var model: MLModel = {
     let configuration = MLModelConfiguration()
-    configuration.computeUnits = .all
+    configuration.computeUnits = .cpuAndNeuralEngine
     guard let url = Bundle.main.url(
       forResource: "RealESRGAN_anime_6B_266_fp16",
       withExtension: "mlmodelc"
@@ -45,13 +45,21 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           return
         }
         let preserveTransparency = arguments["preserveTransparency"] as? Bool ?? true
+        let denoise = (arguments["denoise"] as? NSNumber)?.doubleValue ?? 0.2
+        let sharpness = (arguments["sharpness"] as? NSNumber)?.doubleValue ?? 0.2
+        let detail = (arguments["detail"] as? NSNumber)?.doubleValue ?? 0.5
+        let colorFidelity = (arguments["colorFidelity"] as? NSNumber)?.doubleValue ?? 0.9
         setCancelled(false)
         DispatchQueue.global(qos: .userInitiated).async {
           do {
             let response = try self.upscale(
               path: path,
               requestedScale: scale,
-              preserveTransparency: preserveTransparency
+              preserveTransparency: preserveTransparency,
+              denoise: denoise,
+              sharpness: sharpness,
+              detail: detail,
+              colorFidelity: colorFidelity
             )
             DispatchQueue.main.async { result(response) }
           } catch let error as EngineError {
@@ -74,10 +82,15 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           result(FlutterError(code: "bad_arguments", message: "Invalid video path or scale.", details: nil))
           return
         }
+        let efficient = arguments["efficient"] as? Bool ?? true
         setCancelled(false)
         DispatchQueue.global(qos: .userInitiated).async {
           do {
-            let response = try self.upscaleVideo(path: path, scale: scale)
+            let response = try self.upscaleVideo(
+              path: path,
+              scale: scale,
+              efficient: efficient
+            )
             DispatchQueue.main.async { result(response) }
           } catch let error as EngineError {
             DispatchQueue.main.async {
@@ -114,7 +127,11 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
   private func upscale(
     path: String,
     requestedScale: Int,
-    preserveTransparency: Bool
+    preserveTransparency: Bool,
+    denoise: Double,
+    sharpness: Double,
+    detail: Double,
+    colorFidelity: Double
   ) throws -> [String: Any] {
     guard let image = UIImage(contentsOfFile: path) else {
       throw EngineError("decode_failed", "This image could not be decoded.")
@@ -123,6 +140,10 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       image: image,
       requestedScale: requestedScale,
       preserveTransparency: preserveTransparency,
+      denoise: denoise,
+      sharpness: sharpness,
+      detail: detail,
+      colorFidelity: colorFidelity,
       tileProgress: { [weak self] value in self?.emitProgress(value) }
     )
   }
@@ -131,19 +152,46 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     image: UIImage,
     requestedScale: Int,
     preserveTransparency: Bool,
+    denoise: Double = 0.2,
+    sharpness: Double = 0.2,
+    detail: Double = 0.5,
+    colorFidelity: Double = 0.9,
     tileProgress: ((Double) -> Void)?
   ) throws -> [String: Any] {
-    guard let source = normalizedRGBA(image) else {
+    let originalWidth = Int(image.size.width * image.scale)
+    let originalHeight = Int(image.size.height * image.scale)
+    let safeOutputPixels = 18_000_000.0
+    let requestedOutputPixels = Double(originalWidth * requestedScale * originalHeight * requestedScale)
+    var engineImage = image
+    var memoryFitted = false
+    if requestedOutputPixels > safeOutputPixels {
+      let ratio = sqrt(safeOutputPixels / requestedOutputPixels)
+      let fittedWidth = max(1, Int(Double(originalWidth) * ratio))
+      let fittedHeight = max(1, Int(Double(originalHeight) * ratio))
+      let format = UIGraphicsImageRendererFormat.default()
+      format.scale = 1
+      format.opaque = false
+      engineImage = UIGraphicsImageRenderer(
+        size: CGSize(width: CGFloat(fittedWidth), height: CGFloat(fittedHeight)),
+        format: format
+      ).image { _ in
+        image.draw(
+          in: CGRect(x: 0, y: 0, width: CGFloat(fittedWidth), height: CGFloat(fittedHeight))
+        )
+      }
+      memoryFitted = true
+    }
+    guard let source = normalizedRGBA(engineImage) else {
       throw EngineError("decode_failed", "This image could not be decoded.")
     }
     let width = source.width
     let height = source.height
     let outputWidth = width * requestedScale
     let outputHeight = height * requestedScale
-    guard outputWidth * outputHeight <= 40_000_000 else {
+    guard outputWidth * outputHeight <= 18_500_000 else {
       throw EngineError(
         "image_too_large",
-        "That output would exceed 40 megapixels. Choose 2× or use a smaller image."
+        "That output would exceed the safe memory limit. Use a smaller source image."
       )
     }
 
@@ -170,7 +218,8 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           x0: x0,
           y0: y0,
           tileWidth: tileWidth,
-          tileHeight: tileHeight
+          tileHeight: tileHeight,
+          denoise: denoise
         )
         let provider = try MLDictionaryFeatureProvider(dictionary: ["input": inputArray])
         let prediction = try model.prediction(from: provider)
@@ -212,7 +261,10 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           sourcePixels: source.pixels,
           sourceWidth: width,
           sourceHeight: height,
-          preserveTransparency: preserveTransparency
+          preserveTransparency: preserveTransparency,
+          sharpness: sharpness,
+          detail: detail,
+          colorFidelity: colorFidelity
         )
         completed += 1
         tileProgress?(Double(completed) / Double(totalTiles))
@@ -230,31 +282,44 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     ), let cgImage = context.makeImage() else {
       throw EngineError("encode_failed", "The enhanced image could not be assembled.")
     }
+    let usePNG = preserveTransparency && hasTransparency(source.pixels)
+    let outputType = usePNG ? UTType.png : UTType.jpeg
     let outputURL = FileManager.default.temporaryDirectory
-      .appendingPathComponent("aniscale_\(UUID().uuidString).png")
+      .appendingPathComponent("aniscale_\(UUID().uuidString).\(usePNG ? "png" : "jpg")")
     guard
       let destination = CGImageDestinationCreateWithURL(
         outputURL as CFURL,
-        UTType.png.identifier as CFString,
+        outputType.identifier as CFString,
         1,
         nil
       )
     else {
       throw EngineError("encode_failed", "The enhanced image could not be saved.")
     }
-    CGImageDestinationAddImage(destination, cgImage, nil)
+    let properties: CFDictionary? = usePNG
+      ? nil
+      : [kCGImageDestinationLossyCompressionQuality: 0.96] as CFDictionary
+    CGImageDestinationAddImage(destination, cgImage, properties)
     guard CGImageDestinationFinalize(destination) else {
       throw EngineError("encode_failed", "The enhanced image could not be saved.")
     }
     return [
       "path": outputURL.path,
-      "originalWidth": width,
-      "originalHeight": height,
-      "engine": "Real-ESRGAN Anime 6B (Core ML)"
+      "originalWidth": originalWidth,
+      "originalHeight": originalHeight,
+      "outputWidth": outputWidth,
+      "outputHeight": outputHeight,
+      "engine": memoryFitted
+        ? "Real-ESRGAN Anime 6B (Memory-safe Core ML)"
+        : "Real-ESRGAN Anime 6B (Core ML)"
     ]
   }
 
-  private func upscaleVideo(path: String, scale: Int) throws -> [String: Any] {
+  private func upscaleVideo(
+    path: String,
+    scale: Int,
+    efficient: Bool
+  ) throws -> [String: Any] {
     let sourceURL = URL(fileURLWithPath: path)
     let asset = AVAsset(url: sourceURL)
     guard let videoTrack = asset.tracks(withMediaType: .video).first else {
@@ -330,10 +395,6 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     writer.startSession(atSourceTime: .zero)
 
     let ciContext = CIContext(options: [.useSoftwareRenderer: false])
-    // Use the 4× neural output when the final canvas retains at least 3× of
-    // the source resolution. For 1080p sources, 2× already fills the 4K
-    // hardware encoder limit and avoids generating a wasteful 8K frame first.
-    let aiScale = outputWidth >= sourceWidth * 3 ? 4 : 2
     while let sample = readerOutput.copyNextSampleBuffer() {
       if isCancelled() {
         reader.cancelReading()
@@ -368,12 +429,26 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         frame = frame.transformed(
           by: CGAffineTransform(translationX: -frame.extent.minX, y: -frame.extent.minY)
         )
+        if efficient {
+          let longestEdge = max(frame.extent.width, frame.extent.height)
+          if longestEdge > 960 {
+            frame = frame.applyingFilter(
+              "CILanczosScaleTransform",
+              parameters: [
+                kCIInputScaleKey: 960 / longestEdge,
+                kCIInputAspectRatioKey: 1.0
+              ]
+            )
+          }
+        }
         guard let frameImage = ciContext.createCGImage(frame, from: frame.extent) else {
           throw EngineError(
             "video_frame_decode",
             "A video frame could not be decoded for AI processing."
           )
         }
+        let frameWidth = Int(frame.extent.width.rounded())
+        let aiScale = outputWidth >= frameWidth * 3 ? 4 : 2
         let enhanced = try upscale(
           image: UIImage(cgImage: frameImage),
           requestedScale: aiScale,
@@ -435,7 +510,9 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       "outputWidth": outputWidth,
       "outputHeight": outputHeight,
       "durationSeconds": durationSeconds,
-      "engine": "Real-ESRGAN Anime/3D (Core ML)"
+      "engine": efficient
+        ? "Real-ESRGAN Anime/3D (Efficient Core ML)"
+        : "Real-ESRGAN Anime/3D (Maximum Core ML)"
     ]
   }
 
@@ -525,22 +602,44 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     x0: Int,
     y0: Int,
     tileWidth: Int,
-    tileHeight: Int
+    tileHeight: Int,
+    denoise: Double
   ) {
     let pointer = array.dataPointer.bindMemory(to: Float32.self, capacity: array.count)
     let channelStride = array.strides[1].intValue
     let rowStride = array.strides[2].intValue
     let columnStride = array.strides[3].intValue
+    let cleanup = Float32(max(0, min(1, denoise))) * 0.35
     for localY in 0..<modelSize {
       let sourceY = y0 + reflected(localY, length: tileHeight)
       for localX in 0..<modelSize {
         let sourceX = x0 + reflected(localX, length: tileWidth)
-        let sourceIndex = (min(sourceY, sourceHeight - 1) * sourceWidth + min(sourceX, sourceWidth - 1)) * 4
+        let safeX = min(sourceX, sourceWidth - 1)
+        let safeY = min(sourceY, sourceHeight - 1)
+        let sourceIndex = (safeY * sourceWidth + safeX) * 4
         let alpha = max(Float32(pixels[sourceIndex + 3]) / 255, 1 / 255)
+        let leftIndex = (safeY * sourceWidth + max(0, safeX - 1)) * 4
+        let rightIndex = (safeY * sourceWidth + min(sourceWidth - 1, safeX + 1)) * 4
+        let topIndex = (max(0, safeY - 1) * sourceWidth + safeX) * 4
+        let bottomIndex = (min(sourceHeight - 1, safeY + 1) * sourceWidth + safeX) * 4
         let pixelOffset = localY * rowStride + localX * columnStride
-        pointer[pixelOffset] = min(Float32(pixels[sourceIndex]) / 255 / alpha, 1)
-        pointer[channelStride + pixelOffset] = min(Float32(pixels[sourceIndex + 1]) / 255 / alpha, 1)
-        pointer[channelStride * 2 + pixelOffset] = min(Float32(pixels[sourceIndex + 2]) / 255 / alpha, 1)
+        for channel in 0..<3 {
+          let center = min(Float32(pixels[sourceIndex + channel]) / 255 / alpha, 1)
+          var cleaned = center
+          if cleanup > 0.001 {
+            var sum = center * 4
+            let leftAlpha = max(Float32(pixels[leftIndex + 3]) / 255, 1 / 255)
+            let rightAlpha = max(Float32(pixels[rightIndex + 3]) / 255, 1 / 255)
+            let topAlpha = max(Float32(pixels[topIndex + 3]) / 255, 1 / 255)
+            let bottomAlpha = max(Float32(pixels[bottomIndex + 3]) / 255, 1 / 255)
+            sum += min(Float32(pixels[leftIndex + channel]) / 255 / leftAlpha, 1)
+            sum += min(Float32(pixels[rightIndex + channel]) / 255 / rightAlpha, 1)
+            sum += min(Float32(pixels[topIndex + channel]) / 255 / topAlpha, 1)
+            sum += min(Float32(pixels[bottomIndex + channel]) / 255 / bottomAlpha, 1)
+            cleaned = center * (1 - cleanup) + (sum / 8) * cleanup
+          }
+          pointer[channel * channelStride + pixelOffset] = cleaned
+        }
       }
     }
   }
@@ -559,7 +658,10 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     sourcePixels: [UInt8],
     sourceWidth: Int,
     sourceHeight: Int,
-    preserveTransparency: Bool
+    preserveTransparency: Bool,
+    sharpness: Double,
+    detail: Double,
+    colorFidelity: Double
   ) {
     let downsample = nativeScale / requestedScale
     let channelStride = array.strides[1].intValue
@@ -572,28 +674,53 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       return pointer[index]
     }
 
+    func tune(
+      _ ai: Float32,
+      source: Float32,
+      fidelity: Float32,
+      reconstruction: Float32
+    ) -> Float32 {
+      let faithfulAI = ai * (0.7 + 0.3 * fidelity) + source * (0.3 * (1 - fidelity))
+      return source + (faithfulAI - source) * reconstruction
+    }
+
     for sourceY in coreY0..<coreY1 {
       for sourceX in coreX0..<coreX1 {
         for subY in 0..<requestedScale {
           for subX in 0..<requestedScale {
             let modelX = (sourceX - tileX) * nativeScale + subX * downsample
             let modelY = (sourceY - tileY) * nativeScale + subY * downsample
-            var rgb = [Float32](repeating: 0, count: 3)
+            var red: Float32 = 0
+            var green: Float32 = 0
+            var blue: Float32 = 0
             for sampleY in 0..<downsample {
               for sampleX in 0..<downsample {
-                for channel in 0..<3 {
-                  rgb[channel] += value(
-                    channel: channel,
-                    x: modelX + sampleX,
-                    y: modelY + sampleY
-                  )
-                }
+                let x = modelX + sampleX
+                let y = modelY + sampleY
+                red += value(channel: 0, x: x, y: y)
+                green += value(channel: 1, x: x, y: y)
+                blue += value(channel: 2, x: x, y: y)
               }
             }
             let divisor = Float32(downsample * downsample)
             let outputX = sourceX * requestedScale + subX
             let outputY = sourceY * requestedScale + subY
             let destinationIndex = (outputY * outputWidth + outputX) * 4
+            let sourceIndex = (sourceY * sourceWidth + sourceX) * 4
+            let sourceAlpha = max(Float32(sourcePixels[sourceIndex + 3]) / 255, 1 / 255)
+            let sourceRed = min(Float32(sourcePixels[sourceIndex]) / 255 / sourceAlpha, 1)
+            let sourceGreen = min(Float32(sourcePixels[sourceIndex + 1]) / 255 / sourceAlpha, 1)
+            let sourceBlue = min(Float32(sourcePixels[sourceIndex + 2]) / 255 / sourceAlpha, 1)
+            let fidelity = Float32(max(0, min(1, colorFidelity)))
+            let reconstruction = Float32(0.65 + 0.35 * max(0, min(1, detail)))
+            var tunedRed = tune(red / divisor, source: sourceRed, fidelity: fidelity, reconstruction: reconstruction)
+            var tunedGreen = tune(green / divisor, source: sourceGreen, fidelity: fidelity, reconstruction: reconstruction)
+            var tunedBlue = tune(blue / divisor, source: sourceBlue, fidelity: fidelity, reconstruction: reconstruction)
+            let luminance = tunedRed * 0.2126 + tunedGreen * 0.7152 + tunedBlue * 0.0722
+            let crispness = Float32(1 + 0.12 * max(0, min(1, sharpness)))
+            tunedRed = luminance + (tunedRed - luminance) * crispness
+            tunedGreen = luminance + (tunedGreen - luminance) * crispness
+            tunedBlue = luminance + (tunedBlue - luminance) * crispness
             let alpha = preserveTransparency
               ? interpolatedAlpha(
                   pixels: sourcePixels,
@@ -604,9 +731,9 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
                   scale: requestedScale
                 )
               : 1
-            destination[destinationIndex] = byte(rgb[0] / divisor * alpha)
-            destination[destinationIndex + 1] = byte(rgb[1] / divisor * alpha)
-            destination[destinationIndex + 2] = byte(rgb[2] / divisor * alpha)
+            destination[destinationIndex] = byte(tunedRed * alpha)
+            destination[destinationIndex + 1] = byte(tunedGreen * alpha)
+            destination[destinationIndex + 2] = byte(tunedBlue * alpha)
             destination[destinationIndex + 3] = byte(alpha)
           }
         }
@@ -640,6 +767,15 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
 
   private func byte(_ value: Float32) -> UInt8 {
     UInt8(max(0, min(255, Int((value * 255).rounded()))))
+  }
+
+  private func hasTransparency(_ pixels: [UInt8]) -> Bool {
+    var index = 3
+    while index < pixels.count {
+      if pixels[index] < 255 { return true }
+      index += 4
+    }
+    return false
   }
 
   private func interpolatedAlpha(

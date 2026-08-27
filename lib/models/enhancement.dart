@@ -7,6 +7,8 @@ class Enhancement {
     required this.originalWidth,
     required this.originalHeight,
     required this.engine,
+    this.actualOutputWidth,
+    this.actualOutputHeight,
   });
 
   final String originalPath;
@@ -16,7 +18,9 @@ class Enhancement {
   final int originalWidth;
   final int originalHeight;
   final String engine;
+  final int? actualOutputWidth;
+  final int? actualOutputHeight;
 
-  int get outputWidth => originalWidth * scale;
-  int get outputHeight => originalHeight * scale;
+  int get outputWidth => actualOutputWidth ?? originalWidth * scale;
+  int get outputHeight => actualOutputHeight ?? originalHeight * scale;
 }
