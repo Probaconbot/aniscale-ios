@@ -163,7 +163,12 @@ def convert_model(spec):
         else RRDBNet(spec["blocks"])
     )
     checkpoint = torch.load(weights, map_location="cpu", weights_only=True)
-    network.load_state_dict(checkpoint.get("params_ema", checkpoint), strict=True)
+    # Real-ESRGAN's RRDB checkpoints expose `params_ema`, while the compact
+    # anime-video checkpoint stores the actual state dictionary under `params`.
+    # Accept both official layouts rather than handing the wrapper dictionary
+    # itself to PyTorch.
+    state_dict = checkpoint.get("params_ema", checkpoint.get("params", checkpoint))
+    network.load_state_dict(state_dict, strict=True)
     network.eval()
 
     example = torch.zeros(1, 3, 266, 266)
