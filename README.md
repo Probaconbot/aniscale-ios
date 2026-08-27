@@ -1,24 +1,26 @@
 # AniScale
 
-AniScale is a private, offline-first image upscaler for anime artwork and illustrations.
+AniScale is a private, offline-first image and video enhancer for iPhone.
 
 ## Current build
 
-- Premium glassmorphic Flutter interface based on the AniScale Figma Make design
+- Liquid Glass interface with refractive cards, controls, and floating navigation
 - Image picker for PNG, JPG, and WebP
-- Working local 2× and 4× image enlargement
+- Local 2× and 4× Real-ESRGAN Anime 6B image upscaling through Core ML
+- Local 2× and 4× GPU video enhancement with progress, cancellation, and original audio
 - Editor controls for scale, content style, noise, sharpness, and detail
 - Processing, before/after comparison, local history, settings, save, and share flows
-- iOS and Android project targets
+- No uploads, account, watermark, or cloud API
 
-The current local enlargement engine uses cubic resizing as a functional MVP. The next engine
-milestone is replacing it with tiled Real-ESRGAN inference while retaining the existing UI and
-privacy model.
+The iOS image engine runs a fixed-shape Core ML conversion of the official Real-ESRGAN anime 6B
+weights in overlapping tiles. The video engine currently uses Core Image Lanczos on the iPhone GPU
+and caps output at roughly 4K to control memory use. Video enhancement is local, but is not yet an
+AI frame model.
 
 ## Run
 
-Open this folder in VS Code, choose an Android device or emulator, and press `F5`. The workspace is
-configured to use the Flutter SDK installed at `C:/Users/User/Documents/Codex/tools/flutter`.
+Open this folder in VS Code and use the Flutter SDK installed at
+`C:/Users/User/Documents/Codex/tools/flutter` for Dart analysis and UI development on Windows.
 
-iOS compilation and simulator testing require macOS with Xcode. The generated `ios/` project can be
-opened on a Mac without recreating the Flutter app.
+The GitHub Actions workflow compiles the unsigned iOS app on a hosted macOS runner and packages an
+IPA. Installation still requires the user to sign the IPA with their own Apple ID/certificate.

@@ -187,15 +187,22 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class VideoSelectedScreen extends StatelessWidget {
+class VideoSelectedScreen extends StatefulWidget {
   const VideoSelectedScreen({super.key, required this.inputPath});
 
   final String inputPath;
 
   @override
+  State<VideoSelectedScreen> createState() => _VideoSelectedScreenState();
+}
+
+class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
+  int _scale = 2;
+
+  @override
   Widget build(BuildContext context) {
-    final file = File(inputPath);
-    final filename = inputPath.split(Platform.pathSeparator).last;
+    final file = File(widget.inputPath);
+    final filename = widget.inputPath.split(Platform.pathSeparator).last;
     return Scaffold(
       appBar: const GlassAppBar(title: 'Video'),
       body: AmbientBackground(
@@ -259,16 +266,22 @@ class VideoSelectedScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 18),
+              const ControlLabel('VIDEO UPSCALE'),
+              const SizedBox(height: 9),
+              SegmentedGlass(
+                labels: const ['2×', '4×'],
+                selected: _scale == 2 ? 0 : 1,
+                onSelected: (index) =>
+                    setState(() => _scale = index == 0 ? 2 : 4),
+              ),
+              const SizedBox(height: 18),
               const GlassCard(
                 child: ListTile(
                   contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    Icons.movie_filter_rounded,
-                    color: AniColors.blue,
-                  ),
-                  title: Text('Video AI is the next engine stage'),
+                  leading: Icon(Icons.bolt_rounded, color: AniColors.blue),
+                  title: Text('Local GPU video enhancement'),
                   subtitle: Text(
-                    'It needs a faster frame model, audio preservation, and storage checks. Image AI is active in this build.',
+                    'Every frame is resized on this iPhone and the original audio is preserved. 4× is limited to videos that stay within 4K output.',
                   ),
                 ),
               ),
@@ -283,9 +296,272 @@ class VideoSelectedScreen extends StatelessWidget {
         ),
       ),
       bottomNavigationBar: BottomAction(
-        label: 'Choose an Image to Upscale',
-        note: 'Real-ESRGAN image processing is ready now.',
-        onPressed: () => Navigator.of(context).pop(),
+        label: 'Start Video Upscaling',
+        note: 'Keep AniScale open while frames are processed locally.',
+        onPressed: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => VideoProcessingScreen(
+              inputPath: widget.inputPath,
+              scale: _scale,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class VideoProcessingScreen extends StatefulWidget {
+  const VideoProcessingScreen({
+    super.key,
+    required this.inputPath,
+    required this.scale,
+  });
+
+  final String inputPath;
+  final int scale;
+
+  @override
+  State<VideoProcessingScreen> createState() => _VideoProcessingScreenState();
+}
+
+class _VideoProcessingScreenState extends State<VideoProcessingScreen> {
+  double _progress = .01;
+  bool _cancelled = false;
+  StreamSubscription<double>? _subscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _run();
+  }
+
+  Future<void> _run() async {
+    _subscription = upscaleProgress.listen((value) {
+      if (mounted && !_cancelled) {
+        setState(() => _progress = value.clamp(.01, 1));
+      }
+    });
+    try {
+      final result = await upscaleVideoLocally(
+        path: widget.inputPath,
+        scale: widget.scale,
+      );
+      if (!mounted || _cancelled) return;
+      await Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => VideoResultScreen(result: result),
+        ),
+      );
+    } catch (error) {
+      if (!mounted || _cancelled) return;
+      final detail = error is PlatformException && error.message != null
+          ? error.message!
+          : 'Try a shorter or lower-resolution video.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Video upscaling failed. $detail')),
+      );
+      Navigator.of(context).pop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: AmbientBackground(
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              children: [
+                const Spacer(),
+                LiquidGlassSurface(
+                  borderRadius: 34,
+                  padding: const EdgeInsets.all(34),
+                  child: Column(
+                    children: [
+                      const Icon(
+                        Icons.movie_filter_rounded,
+                        color: AniColors.blue,
+                        size: 52,
+                      ),
+                      const SizedBox(height: 26),
+                      SizedBox(
+                        width: 96,
+                        height: 96,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            CircularProgressIndicator(
+                              value: _progress,
+                              strokeWidth: 7,
+                              backgroundColor: const Color(0x332D3350),
+                              color: AniColors.blue,
+                            ),
+                            Center(
+                              child: Text(
+                                '${(_progress * 100).round()}%',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      const Text(
+                        'Enhancing video frames…',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 21,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 9),
+                      const Text(
+                        'Audio will be added back during the finishing stage.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: AniColors.secondaryText),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 22),
+                TextButton(
+                  onPressed: () async {
+                    _cancelled = true;
+                    await cancelUpscale();
+                    if (context.mounted) Navigator.of(context).pop();
+                  },
+                  child: const Text('Cancel'),
+                ),
+                const Spacer(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class VideoResultScreen extends StatefulWidget {
+  const VideoResultScreen({super.key, required this.result});
+
+  final VideoUpscaleResult result;
+
+  @override
+  State<VideoResultScreen> createState() => _VideoResultScreenState();
+}
+
+class _VideoResultScreenState extends State<VideoResultScreen> {
+  bool _saving = false;
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      await Gal.putVideo(widget.result.path, album: 'AniScale');
+      if (mounted) _message('Enhanced video saved to Photos.');
+    } catch (_) {
+      if (mounted) {
+        _message(
+          'Could not save the video. Check Photos permission and storage.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _share() async {
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(widget.result.path)],
+        text: 'Enhanced locally with AniScale',
+      ),
+    );
+  }
+
+  void _message(String text) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+
+  @override
+  Widget build(BuildContext context) {
+    final result = widget.result;
+    return Scaffold(
+      appBar: const GlassAppBar(title: 'Video Result'),
+      body: AmbientBackground(
+        child: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 28, 20, 150),
+            children: [
+              const Center(
+                child: Icon(
+                  Icons.check_circle_rounded,
+                  color: AniColors.success,
+                  size: 72,
+                ),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                'Your video is ready.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Enhanced locally with the original audio preserved.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AniColors.secondaryText),
+              ),
+              const SizedBox(height: 24),
+              LiquidGlassSurface(
+                borderRadius: 26,
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    const Icon(
+                      Icons.video_file_rounded,
+                      color: AniColors.blue,
+                      size: 56,
+                    ),
+                    const SizedBox(height: 14),
+                    Text('${result.outputWidth} × ${result.outputHeight}'),
+                    const SizedBox(height: 6),
+                    Text(
+                      '${result.durationSeconds.toStringAsFixed(1)} seconds',
+                      style: const TextStyle(color: AniColors.secondaryText),
+                    ),
+                    const SizedBox(height: 12),
+                    FeaturePill(
+                      icon: Icons.memory_rounded,
+                      label: result.engine,
+                      color: AniColors.blue,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _share,
+                icon: const Icon(Icons.ios_share_rounded),
+                label: const Text('Share Video'),
+              ),
+            ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: BottomAction(
+        label: _saving ? 'Saving…' : 'Save Video to Photos',
+        note: 'No cloud upload. No watermark.',
+        onPressed: _saving ? null : _save,
       ),
     );
   }
@@ -1072,25 +1348,132 @@ class GlassCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(22),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          padding: padding,
-          decoration: BoxDecoration(
-            color: AniColors.glass,
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: AniColors.border),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x33000000),
-                blurRadius: 28,
-                offset: Offset(0, 12),
-              ),
-            ],
+    return LiquidGlassSurface(
+      borderRadius: 22,
+      padding: padding,
+      child: Material(type: MaterialType.transparency, child: child),
+    );
+  }
+}
+
+/// A stable Flutter-rendered version of Apple's Liquid Glass look.
+///
+/// It keeps the app compatible with current Flutter iOS builds while using
+/// real backdrop blur, edge refraction highlights and a soft internal tint.
+class LiquidGlassSurface extends StatelessWidget {
+  const LiquidGlassSurface({
+    super.key,
+    required this.child,
+    this.borderRadius = 18,
+    this.padding = EdgeInsets.zero,
+    this.tint = const Color(0x99141725),
+    this.blur = 22,
+  });
+
+  final Widget child;
+  final double borderRadius;
+  final EdgeInsetsGeometry padding;
+  final Color tint;
+  final double blur;
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(borderRadius);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: radius,
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x38000000),
+            blurRadius: 30,
+            offset: Offset(0, 14),
           ),
-          child: Material(type: MaterialType.transparency, child: child),
+          BoxShadow(color: Color(0x169B6CFF), blurRadius: 20, spreadRadius: -8),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: radius,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+          child: Container(
+            padding: padding,
+            decoration: BoxDecoration(
+              borderRadius: radius,
+              border: Border.all(color: const Color(0x36FFFFFF)),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color.alphaBlend(const Color(0x1FFFFFFF), tint),
+                  Color.alphaBlend(const Color(0x0AFFFFFF), tint),
+                  Color.alphaBlend(const Color(0x1418A9E8), tint),
+                ],
+                stops: const [0, .5, 1],
+              ),
+            ),
+            child: Stack(
+              children: [
+                Positioned(
+                  left: 10,
+                  right: 10,
+                  top: 0,
+                  child: IgnorePointer(
+                    child: Container(
+                      height: 1,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [
+                            Colors.transparent,
+                            Color(0xA8FFFFFF),
+                            Colors.transparent,
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(1),
+                      ),
+                    ),
+                  ),
+                ),
+                child,
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class LiquidGlassIconButton extends StatelessWidget {
+  const LiquidGlassIconButton({
+    super.key,
+    required this.icon,
+    required this.onPressed,
+    this.tooltip,
+  });
+
+  final IconData icon;
+  final VoidCallback onPressed;
+  final String? tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    return LiquidGlassSurface(
+      borderRadius: 15,
+      tint: const Color(0xAA171A2A),
+      blur: 18,
+      child: Tooltip(
+        message: tooltip ?? '',
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(15),
+            onTap: onPressed,
+            child: SizedBox(
+              width: 44,
+              height: 44,
+              child: Icon(icon, size: 20, color: Colors.white),
+            ),
+          ),
         ),
       ),
     );
@@ -1121,13 +1504,10 @@ class BrandHeader extends StatelessWidget {
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
         ),
         const Spacer(),
-        IconButton.filledTonal(
+        LiquidGlassIconButton(
           onPressed: onSettings,
-          icon: const Icon(Icons.tune_rounded, size: 20),
-          style: IconButton.styleFrom(
-            backgroundColor: AniColors.glass,
-            side: const BorderSide(color: AniColors.border),
-          ),
+          icon: Icons.tune_rounded,
+          tooltip: 'Settings',
         ),
       ],
     );
@@ -1254,44 +1634,47 @@ class SegmentedGlass extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 44,
+    return LiquidGlassSurface(
+      borderRadius: 16,
       padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: const Color(0x80141725),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AniColors.border),
-      ),
-      child: Row(
-        children: List.generate(labels.length, (index) {
-          final active = index == selected;
-          return Expanded(
-            child: GestureDetector(
-              onTap: () => onSelected(index),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 220),
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  gradient: active ? aniGradient : null,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: active
-                      ? const [
-                          BoxShadow(color: Color(0x449B6CFF), blurRadius: 12),
-                        ]
-                      : null,
-                ),
-                child: Text(
-                  labels[index],
-                  style: TextStyle(
-                    color: active ? Colors.white : AniColors.mutedText,
-                    fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                    fontSize: 13,
+      tint: const Color(0xA5141725),
+      child: SizedBox(
+        height: 36,
+        child: Row(
+          children: List.generate(labels.length, (index) {
+            final active = index == selected;
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => onSelected(index),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    gradient: active ? aniGradient : null,
+                    borderRadius: BorderRadius.circular(12),
+                    border: active
+                        ? Border.all(color: const Color(0x55FFFFFF))
+                        : null,
+                    boxShadow: active
+                        ? const [
+                            BoxShadow(color: Color(0x449B6CFF), blurRadius: 12),
+                          ]
+                        : null,
+                  ),
+                  child: Text(
+                    labels[index],
+                    style: TextStyle(
+                      color: active ? Colors.white : AniColors.mutedText,
+                      fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                      fontSize: 13,
+                    ),
                   ),
                 ),
               ),
-            ),
-          );
-        }),
+            );
+          }),
+        ),
       ),
     );
   }
@@ -1348,59 +1731,62 @@ class FloatingNav extends StatelessWidget {
     ];
     return SafeArea(
       minimum: const EdgeInsets.fromLTRB(18, 0, 18, 12),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(24),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-          child: Container(
-            height: 72,
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-            decoration: BoxDecoration(
-              color: const Color(0xE0141725),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: AniColors.border),
-            ),
-            child: Row(
-              children: List.generate(items.length, (index) {
-                final active = index == selectedIndex;
-                return Expanded(
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(17),
-                    onTap: () => onSelected(index),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 220),
-                      decoration: BoxDecoration(
-                        gradient: active ? aniGradient : null,
-                        borderRadius: BorderRadius.circular(17),
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            items[index].$1,
+      child: LiquidGlassSurface(
+        borderRadius: 24,
+        tint: const Color(0xD0141725),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+        child: SizedBox(
+          height: 58,
+          child: Row(
+            children: List.generate(items.length, (index) {
+              final active = index == selectedIndex;
+              return Expanded(
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(17),
+                  onTap: () => onSelected(index),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    decoration: BoxDecoration(
+                      gradient: active ? aniGradient : null,
+                      borderRadius: BorderRadius.circular(17),
+                      border: active
+                          ? Border.all(color: const Color(0x55FFFFFF))
+                          : null,
+                      boxShadow: active
+                          ? const [
+                              BoxShadow(
+                                color: Color(0x339B6CFF),
+                                blurRadius: 14,
+                              ),
+                            ]
+                          : null,
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          items[index].$1,
+                          color: active ? Colors.white : AniColors.mutedText,
+                          size: 21,
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          items[index].$2,
+                          style: TextStyle(
                             color: active ? Colors.white : AniColors.mutedText,
-                            size: 21,
+                            fontSize: 10,
+                            fontWeight: active
+                                ? FontWeight.w700
+                                : FontWeight.w500,
                           ),
-                          const SizedBox(height: 3),
-                          Text(
-                            items[index].$2,
-                            style: TextStyle(
-                              color: active
-                                  ? Colors.white
-                                  : AniColors.mutedText,
-                              fontSize: 10,
-                              fontWeight: active
-                                  ? FontWeight.w700
-                                  : FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
-                );
-              }),
-            ),
+                ),
+              );
+            }),
           ),
         ),
       ),

@@ -9,6 +9,7 @@ from urllib.request import urlretrieve
 import hashlib
 
 import coremltools as ct
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as functional
@@ -113,7 +114,8 @@ def main():
 
     model = ct.convert(
         traced,
-        inputs=[ct.TensorType(name="input", shape=example.shape)],
+        inputs=[ct.TensorType(name="input", shape=example.shape, dtype=np.float32)],
+        outputs=[ct.TensorType(name="output", dtype=np.float32)],
         minimum_deployment_target=ct.target.iOS15,
         convert_to="mlprogram",
         compute_precision=ct.precision.FLOAT16,

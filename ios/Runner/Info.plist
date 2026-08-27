@@ -27,9 +27,9 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>AniScale needs access so you can choose images to enhance.</string>
+	<string>AniScale needs access so you can choose images and videos to enhance.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>AniScale needs permission to save your enhanced images.</string>
+	<string>AniScale needs permission to save your enhanced images and videos.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

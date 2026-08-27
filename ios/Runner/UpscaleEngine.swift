@@ -1,4 +1,6 @@
 import CoreML
+import AVFoundation
+import CoreImage
 import Flutter
 import ImageIO
 import UIKit
@@ -59,6 +61,31 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           } catch {
             DispatchQueue.main.async {
               result(FlutterError(code: "engine_failed", message: error.localizedDescription, details: nil))
+            }
+          }
+        }
+      case "upscaleVideo":
+        guard
+          let arguments = call.arguments as? [String: Any],
+          let path = arguments["path"] as? String,
+          let scale = arguments["scale"] as? Int,
+          scale == 2 || scale == 4
+        else {
+          result(FlutterError(code: "bad_arguments", message: "Invalid video path or scale.", details: nil))
+          return
+        }
+        setCancelled(false)
+        DispatchQueue.global(qos: .userInitiated).async {
+          do {
+            let response = try self.upscaleVideo(path: path, scale: scale)
+            DispatchQueue.main.async { result(response) }
+          } catch let error as EngineError {
+            DispatchQueue.main.async {
+              result(FlutterError(code: error.code, message: error.message, details: nil))
+            }
+          } catch {
+            DispatchQueue.main.async {
+              result(FlutterError(code: "video_engine_failed", message: error.localizedDescription, details: nil))
             }
           }
         }
@@ -131,10 +158,19 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         let provider = try MLDictionaryFeatureProvider(dictionary: ["input": inputArray])
         let prediction = try model.prediction(from: provider)
         guard
-          let outputName = model.modelDescription.outputDescriptionsByName.keys.first,
-          let values = prediction.featureValue(for: outputName)?.multiArrayValue
+          let values = prediction.featureValue(for: "output")?.multiArrayValue
         else {
           throw EngineError("invalid_model", "The AI model returned an invalid result.")
+        }
+
+        guard
+          values.dataType == .float32,
+          values.shape.count == 4,
+          values.shape[1].intValue == 3,
+          values.shape[2].intValue == modelSize * nativeScale,
+          values.shape[3].intValue == modelSize * nativeScale
+        else {
+          throw EngineError("invalid_model", "The AI model returned an unexpected tensor layout.")
         }
 
         let coreX0 = column == 0 ? x0 : (x0 + xStarts[column - 1] + tileSize) / 2
@@ -201,6 +237,201 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     ]
   }
 
+  private func upscaleVideo(path: String, scale: Int) throws -> [String: Any] {
+    let sourceURL = URL(fileURLWithPath: path)
+    let asset = AVAsset(url: sourceURL)
+    guard let videoTrack = asset.tracks(withMediaType: .video).first else {
+      throw EngineError("video_decode_failed", "That file does not contain a readable video track.")
+    }
+
+    let transformedRect = CGRect(origin: .zero, size: videoTrack.naturalSize)
+      .applying(videoTrack.preferredTransform)
+    let sourceWidth = Int(abs(transformedRect.width).rounded())
+    let sourceHeight = Int(abs(transformedRect.height).rounded())
+    let outputWidth = max(2, ((sourceWidth * scale) / 2) * 2)
+    let outputHeight = max(2, ((sourceHeight * scale) / 2) * 2)
+    guard outputWidth * outputHeight <= 8_847_360 else {
+      throw EngineError(
+        "video_too_large",
+        "That scale would exceed 4K per frame. Choose 2× or use a smaller video."
+      )
+    }
+    let durationSeconds = max(CMTimeGetSeconds(asset.duration), 0.01)
+
+    let reader = try AVAssetReader(asset: asset)
+    let readerOutput = AVAssetReaderTrackOutput(
+      track: videoTrack,
+      outputSettings: [
+        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+      ]
+    )
+    readerOutput.alwaysCopiesSampleData = false
+    guard reader.canAdd(readerOutput) else {
+      throw EngineError("video_decode_failed", "The video decoder could not be configured.")
+    }
+    reader.add(readerOutput)
+
+    let silentURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("aniscale_video_frames_\(UUID().uuidString).mp4")
+    let finalURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("aniscale_video_\(UUID().uuidString).mp4")
+    let writer = try AVAssetWriter(outputURL: silentURL, fileType: .mp4)
+    let bitrate = min(40_000_000, max(4_000_000, outputWidth * outputHeight * 4))
+    let writerInput = AVAssetWriterInput(
+      mediaType: .video,
+      outputSettings: [
+        AVVideoCodecKey: AVVideoCodecType.h264,
+        AVVideoWidthKey: outputWidth,
+        AVVideoHeightKey: outputHeight,
+        AVVideoCompressionPropertiesKey: [
+          AVVideoAverageBitRateKey: bitrate,
+          AVVideoExpectedSourceFrameRateKey: max(1, Int(videoTrack.nominalFrameRate.rounded()))
+        ]
+      ]
+    )
+    writerInput.expectsMediaDataInRealTime = false
+    let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+      assetWriterInput: writerInput,
+      sourcePixelBufferAttributes: [
+        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+        kCVPixelBufferWidthKey as String: outputWidth,
+        kCVPixelBufferHeightKey as String: outputHeight,
+        kCVPixelBufferIOSurfacePropertiesKey as String: [:]
+      ]
+    )
+    guard writer.canAdd(writerInput) else {
+      throw EngineError("video_encode_failed", "The video encoder could not be configured.")
+    }
+    writer.add(writerInput)
+    guard reader.startReading(), writer.startWriting() else {
+      throw EngineError("video_start_failed", reader.error?.localizedDescription ?? writer.error?.localizedDescription ?? "Video processing could not start.")
+    }
+    writer.startSession(atSourceTime: .zero)
+
+    let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+    while let sample = readerOutput.copyNextSampleBuffer() {
+      if isCancelled() {
+        reader.cancelReading()
+        writer.cancelWriting()
+        try? FileManager.default.removeItem(at: silentURL)
+        throw EngineError("cancelled", "Video upscaling was cancelled.")
+      }
+      guard let inputBuffer = CMSampleBufferGetImageBuffer(sample) else { continue }
+      while !writerInput.isReadyForMoreMediaData {
+        if isCancelled() { break }
+        Thread.sleep(forTimeInterval: 0.004)
+      }
+      guard
+        let pool = adaptor.pixelBufferPool
+      else {
+        throw EngineError("video_encode_failed", "The output pixel buffer pool is unavailable.")
+      }
+      var outputBuffer: CVPixelBuffer?
+      guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &outputBuffer) == kCVReturnSuccess,
+            let outputBuffer else {
+        throw EngineError("video_memory", "The iPhone ran out of video processing memory.")
+      }
+
+      autoreleasepool {
+        var frame = CIImage(cvPixelBuffer: inputBuffer).transformed(by: videoTrack.preferredTransform)
+        frame = frame.transformed(
+          by: CGAffineTransform(translationX: -frame.extent.minX, y: -frame.extent.minY)
+        )
+        frame = frame.applyingFilter(
+          "CILanczosScaleTransform",
+          parameters: [kCIInputScaleKey: CGFloat(scale), kCIInputAspectRatioKey: 1.0]
+        )
+        ciContext.render(
+          frame,
+          to: outputBuffer,
+          bounds: CGRect(x: 0, y: 0, width: outputWidth, height: outputHeight),
+          colorSpace: CGColorSpaceCreateDeviceRGB()
+        )
+      }
+      let timestamp = CMSampleBufferGetPresentationTimeStamp(sample)
+      guard adaptor.append(outputBuffer, withPresentationTime: timestamp) else {
+        throw EngineError("video_encode_failed", writer.error?.localizedDescription ?? "A video frame could not be encoded.")
+      }
+      emitProgress(min(0.92, max(0.01, CMTimeGetSeconds(timestamp) / durationSeconds * 0.92)))
+    }
+
+    writerInput.markAsFinished()
+    let writerFinished = DispatchSemaphore(value: 0)
+    writer.finishWriting { writerFinished.signal() }
+    writerFinished.wait()
+    guard reader.status == .completed, writer.status == .completed else {
+      throw EngineError(
+        "video_encode_failed",
+        reader.error?.localizedDescription ?? writer.error?.localizedDescription ?? "Video processing did not finish."
+      )
+    }
+    emitProgress(0.95)
+    try preserveAudio(from: asset, processedVideoURL: silentURL, outputURL: finalURL)
+    try? FileManager.default.removeItem(at: silentURL)
+    emitProgress(1)
+    return [
+      "path": finalURL.path,
+      "outputWidth": outputWidth,
+      "outputHeight": outputHeight,
+      "durationSeconds": durationSeconds,
+      "engine": "Core Image Lanczos (GPU)"
+    ]
+  }
+
+  private func preserveAudio(
+    from originalAsset: AVAsset,
+    processedVideoURL: URL,
+    outputURL: URL
+  ) throws {
+    guard let audioTrack = originalAsset.tracks(withMediaType: .audio).first else {
+      try FileManager.default.moveItem(at: processedVideoURL, to: outputURL)
+      return
+    }
+    let processedAsset = AVAsset(url: processedVideoURL)
+    guard let processedTrack = processedAsset.tracks(withMediaType: .video).first else {
+      throw EngineError("video_mux_failed", "The processed video track could not be reopened.")
+    }
+    let composition = AVMutableComposition()
+    guard
+      let compositionVideo = composition.addMutableTrack(
+        withMediaType: .video,
+        preferredTrackID: kCMPersistentTrackID_Invalid
+      ),
+      let compositionAudio = composition.addMutableTrack(
+        withMediaType: .audio,
+        preferredTrackID: kCMPersistentTrackID_Invalid
+      )
+    else {
+      throw EngineError("video_mux_failed", "Audio preservation could not be configured.")
+    }
+    let duration = processedAsset.duration
+    try compositionVideo.insertTimeRange(
+      CMTimeRange(start: .zero, duration: duration),
+      of: processedTrack,
+      at: .zero
+    )
+    try compositionAudio.insertTimeRange(
+      CMTimeRange(start: .zero, duration: CMTimeMinimum(duration, originalAsset.duration)),
+      of: audioTrack,
+      at: .zero
+    )
+    guard let exporter = AVAssetExportSession(
+      asset: composition,
+      presetName: AVAssetExportPresetPassthrough
+    ) else {
+      throw EngineError("video_mux_failed", "The final video exporter is unavailable.")
+    }
+    exporter.outputURL = outputURL
+    exporter.outputFileType = .mp4
+    exporter.shouldOptimizeForNetworkUse = false
+    let exportFinished = DispatchSemaphore(value: 0)
+    exporter.exportAsynchronously { exportFinished.signal() }
+    exportFinished.wait()
+    guard exporter.status == .completed else {
+      throw EngineError("video_mux_failed", exporter.error?.localizedDescription ?? "Audio could not be preserved.")
+    }
+  }
+
   private func normalizedRGBA(_ image: UIImage) -> PixelImage? {
     let width = Int(image.size.width * image.scale)
     let height = Int(image.size.height * image.scale)
@@ -231,18 +462,20 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     tileWidth: Int,
     tileHeight: Int
   ) {
-    let pointer = array.dataPointer.bindMemory(to: Float32.self, capacity: modelSize * modelSize * 3)
-    let plane = modelSize * modelSize
+    let pointer = array.dataPointer.bindMemory(to: Float32.self, capacity: array.count)
+    let channelStride = array.strides[1].intValue
+    let rowStride = array.strides[2].intValue
+    let columnStride = array.strides[3].intValue
     for localY in 0..<modelSize {
       let sourceY = y0 + reflected(localY, length: tileHeight)
       for localX in 0..<modelSize {
         let sourceX = x0 + reflected(localX, length: tileWidth)
         let sourceIndex = (min(sourceY, sourceHeight - 1) * sourceWidth + min(sourceX, sourceWidth - 1)) * 4
-        let destinationIndex = localY * modelSize + localX
         let alpha = max(Float32(pixels[sourceIndex + 3]) / 255, 1 / 255)
-        pointer[destinationIndex] = min(Float32(pixels[sourceIndex]) / 255 / alpha, 1)
-        pointer[plane + destinationIndex] = min(Float32(pixels[sourceIndex + 1]) / 255 / alpha, 1)
-        pointer[plane * 2 + destinationIndex] = min(Float32(pixels[sourceIndex + 2]) / 255 / alpha, 1)
+        let pixelOffset = localY * rowStride + localX * columnStride
+        pointer[pixelOffset] = min(Float32(pixels[sourceIndex]) / 255 / alpha, 1)
+        pointer[channelStride + pixelOffset] = min(Float32(pixels[sourceIndex + 1]) / 255 / alpha, 1)
+        pointer[channelStride * 2 + pixelOffset] = min(Float32(pixels[sourceIndex + 2]) / 255 / alpha, 1)
       }
     }
   }
@@ -263,13 +496,14 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     sourceHeight: Int,
     preserveTransparency: Bool
   ) {
-    let modelOutputSize = modelSize * nativeScale
-    let plane = modelOutputSize * modelOutputSize
     let downsample = nativeScale / requestedScale
+    let channelStride = array.strides[1].intValue
+    let rowStride = array.strides[2].intValue
+    let columnStride = array.strides[3].intValue
+    let pointer = array.dataPointer.bindMemory(to: Float32.self, capacity: array.count)
 
     func value(channel: Int, x: Int, y: Int) -> Float32 {
-      let index = channel * plane + y * modelOutputSize + x
-      let pointer = array.dataPointer.bindMemory(to: Float32.self, capacity: plane * 3)
+      let index = channel * channelStride + y * rowStride + x * columnStride
       return pointer[index]
     }
 
