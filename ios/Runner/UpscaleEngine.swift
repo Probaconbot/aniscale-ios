@@ -19,7 +19,11 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
   private var progressSink: FlutterEventSink?
   private lazy var model: MLModel = {
     let configuration = MLModelConfiguration()
-    configuration.computeUnits = .cpuAndNeuralEngine
+    if #available(iOS 16.0, *) {
+      configuration.computeUnits = .cpuAndNeuralEngine
+    } else {
+      configuration.computeUnits = .all
+    }
     guard let url = Bundle.main.url(
       forResource: "RealESRGAN_anime_6B_266_fp16",
       withExtension: "mlmodelc"
