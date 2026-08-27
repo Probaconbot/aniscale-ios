@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -22,6 +23,9 @@ class UpscaleRequest {
     this.sharpness = .2,
     this.detail = .5,
     this.colorFidelity = .9,
+    this.outputFormat = 'automatic',
+    this.tileSize = 256,
+    this.preserveMetadata = true,
   });
 
   final String path;
@@ -31,6 +35,9 @@ class UpscaleRequest {
   final double sharpness;
   final double detail;
   final double colorFidelity;
+  final String outputFormat;
+  final int tileSize;
+  final bool preserveMetadata;
 }
 
 class UpscaleResult {
@@ -80,6 +87,7 @@ Future<VideoUpscaleResult> upscaleVideoLocally({
   required String path,
   required int scale,
   required bool efficient,
+  required int tileSize,
 }) async {
   if (!Platform.isIOS) {
     throw UnsupportedError(
@@ -88,7 +96,12 @@ Future<VideoUpscaleResult> upscaleVideoLocally({
   }
   final response = await _upscaleChannel.invokeMapMethod<String, dynamic>(
     'upscaleVideo',
-    {'path': path, 'scale': scale, 'efficient': efficient},
+    {
+      'path': path,
+      'scale': scale,
+      'efficient': efficient,
+      'tileSize': tileSize,
+    },
   );
   if (response == null) {
     throw PlatformException(
@@ -116,6 +129,9 @@ Future<UpscaleResult> _upscaleWithCoreML(UpscaleRequest request) async {
       'sharpness': request.sharpness,
       'detail': request.detail,
       'colorFidelity': request.colorFidelity,
+      'outputFormat': request.outputFormat,
+      'tileSize': request.tileSize,
+      'preserveMetadata': request.preserveMetadata,
     },
   );
   if (response == null) {
@@ -164,9 +180,24 @@ String _prepareVisionImage(String path) {
 
 Future<UpscaleResult> _resizeImage(UpscaleRequest request) async {
   final Uint8List bytes = await File(request.path).readAsBytes();
-  final img.Image? source = img.decodeImage(bytes);
+  var source = img.decodeImage(bytes);
   if (source == null) {
     throw const FormatException('This image format could not be decoded.');
+  }
+  source = img.bakeOrientation(source);
+  final originalWidth = source.width;
+  final originalHeight = source.height;
+  const safeOutputPixels = 18000000;
+  final requestedPixels =
+      source.width * request.scale * source.height * request.scale;
+  if (requestedPixels > safeOutputPixels) {
+    final ratio = (safeOutputPixels / requestedPixels).clamp(0, 1).toDouble();
+    final linearRatio = ratio <= 0 ? 1.0 : math.sqrt(ratio);
+    source = img.copyResize(
+      source,
+      width: (source.width * linearRatio).round().clamp(1, source.width),
+      height: (source.height * linearRatio).round().clamp(1, source.height),
+    );
   }
 
   final resized = img.copyResize(
@@ -176,15 +207,25 @@ Future<UpscaleResult> _resizeImage(UpscaleRequest request) async {
     interpolation: img.Interpolation.cubic,
   );
   final stamp = DateTime.now().millisecondsSinceEpoch;
-  final output = File('${Directory.systemTemp.path}/aniscale_$stamp.png');
-  await output.writeAsBytes(img.encodePng(resized, level: 6), flush: true);
+  final usePng =
+      request.outputFormat == 'png' ||
+      (request.outputFormat == 'automatic' && source.numChannels == 4);
+  final output = File(
+    '${Directory.systemTemp.path}/aniscale_$stamp.${usePng ? 'png' : 'jpg'}',
+  );
+  await output.writeAsBytes(
+    usePng
+        ? img.encodePng(resized, level: 6)
+        : img.encodeJpg(resized, quality: 96),
+    flush: true,
+  );
 
   return UpscaleResult(
     path: output.path,
-    originalWidth: source.width,
-    originalHeight: source.height,
+    originalWidth: originalWidth,
+    originalHeight: originalHeight,
     outputWidth: resized.width,
     outputHeight: resized.height,
-    engine: 'High-quality cubic fallback',
+    engine: 'High-quality mobile resampler',
   );
 }

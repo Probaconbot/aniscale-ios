@@ -1,4 +1,4 @@
-name: Build unsigned iOS IPA
+name: Build AniScale mobile releases
 
 on:
   workflow_dispatch:
@@ -28,6 +28,10 @@ jobs:
       - name: Resolve Flutter packages
         shell: bash
         run: flutter pub get
+
+      - name: Generate AniScale app icons
+        shell: bash
+        run: dart run flutter_launcher_icons
 
       - name: Set up Python for the Core ML model
         uses: actions/setup-python@v5
@@ -78,5 +82,23 @@ jobs:
         with:
           name: AniScale-unsigned-ipa
           path: AniScale-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Use Java 17 for Android
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build Android APK
+        shell: bash
+        run: flutter build apk --release
+
+      - name: Upload AniScale APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AniScale-android-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 14

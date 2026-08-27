@@ -34,6 +34,7 @@ migrate_working_dir/
 /coverage/
 /outputs/
 /work/
+/release-v*/
 /ios/Runner/Models/*.mlpackage/
 /ios/Runner/Models/*.pth
 /RealESRGAN_*.zip
@@ -48,6 +49,7 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+/android/.kotlin/
 
 # Widget Preview related
 .widget_preview/

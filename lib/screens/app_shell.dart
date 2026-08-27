@@ -7,8 +7,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:gal/gal.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../models/app_settings.dart';
 import '../models/enhancement.dart';
 import '../services/upscale_service.dart';
 import '../theme/app_theme.dart';
@@ -23,8 +25,23 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int _tab = 0;
   final List<Enhancement> _history = [];
+  AppSettings _settings = const AppSettings();
+
+  @override
+  void initState() {
+    super.initState();
+    AppSettings.load().then((settings) {
+      if (mounted) setState(() => _settings = settings);
+    });
+  }
+
+  void _updateSettings(AppSettings settings) {
+    setState(() => _settings = settings);
+    unawaited(settings.save());
+  }
 
   void _addEnhancement(Enhancement enhancement) {
+    if (!_settings.saveHistory) return;
     setState(() => _history.insert(0, enhancement));
   }
 
@@ -35,23 +52,32 @@ class _AppShellState extends State<AppShell> {
         history: _history,
         onOpenSettings: () => setState(() => _tab = 3),
         onEnhanced: _addEnhancement,
+        settings: _settings,
       ),
       HistoryScreen(history: _history),
-      GroqAssistantScreen(onEnhanced: _addEnhancement),
-      SettingsScreen(onClearHistory: () => setState(_history.clear)),
+      GroqAssistantScreen(onEnhanced: _addEnhancement, settings: _settings),
+      SettingsScreen(
+        onClearHistory: () => setState(_history.clear),
+        settings: _settings,
+        onSettingsChanged: _updateSettings,
+      ),
     ];
 
-    return Scaffold(
-      extendBody: true,
-      body: AmbientBackground(
-        child: SafeArea(
-          bottom: false,
-          child: IndexedStack(index: _tab, children: pages),
+    final mediaQuery = MediaQuery.of(context);
+    return MediaQuery(
+      data: mediaQuery.copyWith(disableAnimations: _settings.reduceMotion),
+      child: Scaffold(
+        extendBody: true,
+        body: AmbientBackground(
+          child: SafeArea(
+            bottom: false,
+            child: IndexedStack(index: _tab, children: pages),
+          ),
         ),
-      ),
-      bottomNavigationBar: FloatingNav(
-        selectedIndex: _tab,
-        onSelected: (index) => setState(() => _tab = index),
+        bottomNavigationBar: FloatingNav(
+          selectedIndex: _tab,
+          onSelected: (index) => setState(() => _tab = index),
+        ),
       ),
     );
   }
@@ -63,11 +89,13 @@ class HomeScreen extends StatefulWidget {
     required this.history,
     required this.onOpenSettings,
     required this.onEnhanced,
+    required this.settings,
   });
 
   final List<Enhancement> history;
   final VoidCallback onOpenSettings;
   final ValueChanged<Enhancement> onEnhanced;
+  final AppSettings settings;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -86,7 +114,10 @@ class _HomeScreenState extends State<HomeScreen> {
         if (file == null || !mounted) return;
         await Navigator.of(context).push(
           MaterialPageRoute<void>(
-            builder: (_) => VideoSelectedScreen(inputPath: file.path),
+            builder: (_) => VideoSelectedScreen(
+              inputPath: file.path,
+              settings: widget.settings,
+            ),
           ),
         );
       } catch (_) {
@@ -102,8 +133,11 @@ class _HomeScreenState extends State<HomeScreen> {
       if (file == null || !mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) =>
-              EditorScreen(inputPath: file.path, onEnhanced: widget.onEnhanced),
+          builder: (_) => EditorScreen(
+            inputPath: file.path,
+            onEnhanced: widget.onEnhanced,
+            settings: widget.settings,
+          ),
         ),
       );
     } catch (_) {
@@ -190,9 +224,14 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 class VideoSelectedScreen extends StatefulWidget {
-  const VideoSelectedScreen({super.key, required this.inputPath});
+  const VideoSelectedScreen({
+    super.key,
+    required this.inputPath,
+    required this.settings,
+  });
 
   final String inputPath;
+  final AppSettings settings;
 
   @override
   State<VideoSelectedScreen> createState() => _VideoSelectedScreenState();
@@ -200,7 +239,13 @@ class VideoSelectedScreen extends StatefulWidget {
 
 class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
   int _scale = 2;
-  int _performance = 0;
+  late int _performance;
+
+  @override
+  void initState() {
+    super.initState();
+    _performance = widget.settings.performance == 1 ? 1 : 0;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -297,13 +342,22 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                 ),
               ),
               const SizedBox(height: 18),
-              const GlassCard(
+              GlassCard(
                 child: ListTile(
                   contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.bolt_rounded, color: AniColors.blue),
-                  title: Text('Real-ESRGAN video AI'),
+                  leading: const Icon(
+                    Icons.bolt_rounded,
+                    color: AniColors.blue,
+                  ),
+                  title: Text(
+                    Platform.isIOS
+                        ? 'Real-ESRGAN video AI'
+                        : 'Android video engine',
+                  ),
                   subtitle: Text(
-                    'Anime and stylized 3D frames are cleaned and upscaled with Core ML. Original audio is preserved and oversized results fit a safe 4K output.',
+                    Platform.isIOS
+                        ? 'Anime and stylized 3D frames are cleaned and upscaled with Core ML. Original audio is preserved and oversized results fit a safe 4K output.'
+                        : 'Video enhancement is not available in this Android beta yet. Image enhancement and Assistant recipes are available.',
                   ),
                 ),
               ),
@@ -320,15 +374,18 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
       bottomNavigationBar: BottomAction(
         label: 'Start Video Upscaling',
         note: 'Real AI processes every frame. Keep AniScale open; this can take a while.',
-        onPressed: () => Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => VideoProcessingScreen(
-              inputPath: widget.inputPath,
-              scale: _scale,
-              efficient: _performance == 0,
-            ),
-          ),
-        ),
+        onPressed: Platform.isIOS
+            ? () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => VideoProcessingScreen(
+                    inputPath: widget.inputPath,
+                    scale: _scale,
+                    efficient: _performance == 0,
+                    tileSize: widget.settings.engineTileSize,
+                  ),
+                ),
+              )
+            : null,
       ),
     );
   }
@@ -340,11 +397,13 @@ class VideoProcessingScreen extends StatefulWidget {
     required this.inputPath,
     required this.scale,
     required this.efficient,
+    required this.tileSize,
   });
 
   final String inputPath;
   final int scale;
   final bool efficient;
+  final int tileSize;
 
   @override
   State<VideoProcessingScreen> createState() => _VideoProcessingScreenState();
@@ -372,6 +431,7 @@ class _VideoProcessingScreenState extends State<VideoProcessingScreen> {
         path: widget.inputPath,
         scale: widget.scale,
         efficient: widget.efficient,
+        tileSize: widget.tileSize,
       );
       if (!mounted || _cancelled) return;
       await Navigator.of(context).pushReplacement(
@@ -598,10 +658,12 @@ class EditorScreen extends StatefulWidget {
     super.key,
     required this.inputPath,
     required this.onEnhanced,
+    required this.settings,
   });
 
   final String inputPath;
   final ValueChanged<Enhancement> onEnhanced;
+  final AppSettings settings;
 
   @override
   State<EditorScreen> createState() => _EditorScreenState();
@@ -619,6 +681,10 @@ class _EditorScreenState extends State<EditorScreen> {
           scale: _scale,
           preserveTransparency: _transparency,
           onEnhanced: widget.onEnhanced,
+          outputFormat: widget.settings.outputFormat.engineValue,
+          tileSize: widget.settings.engineTileSize,
+          performance: widget.settings.performance,
+          preserveMetadata: widget.settings.preserveMetadata,
         ),
       ),
     );
@@ -725,10 +791,18 @@ class _EditorScreenState extends State<EditorScreen> {
                 child: SwitchListTile.adaptive(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Preserve transparency'),
-                  subtitle: const Text('PNG output is used when needed.'),
-                  value: _transparency,
+                  subtitle: Text(
+                    widget.settings.outputFormat == OutputFormat.jpeg
+                        ? 'Disabled because JPEG has no transparency.'
+                        : 'PNG output is used when needed.',
+                  ),
+                  value:
+                      _transparency &&
+                      widget.settings.outputFormat != OutputFormat.jpeg,
                   activeTrackColor: AniColors.purple,
-                  onChanged: (value) => setState(() => _transparency = value),
+                  onChanged: widget.settings.outputFormat == OutputFormat.jpeg
+                      ? null
+                      : (value) => setState(() => _transparency = value),
                 ),
               ),
             ],
@@ -755,6 +829,10 @@ class ProcessingScreen extends StatefulWidget {
     this.sharpness = .2,
     this.detail = .5,
     this.colorFidelity = .9,
+    this.outputFormat = 'automatic',
+    this.tileSize = 256,
+    this.performance = 0,
+    this.preserveMetadata = true,
   });
 
   final String inputPath;
@@ -765,6 +843,10 @@ class ProcessingScreen extends StatefulWidget {
   final double sharpness;
   final double detail;
   final double colorFidelity;
+  final String outputFormat;
+  final int tileSize;
+  final int performance;
+  final bool preserveMetadata;
 
   @override
   State<ProcessingScreen> createState() => _ProcessingScreenState();
@@ -807,15 +889,28 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
     });
 
     try {
+      final performanceDenoise = switch (widget.performance) {
+        1 => .28,
+        2 => .10,
+        _ => .20,
+      };
+      final performanceDetail = switch (widget.performance) {
+        1 => .72,
+        2 => .42,
+        _ => .55,
+      };
       final result = await upscaleLocally(
         UpscaleRequest(
           path: widget.inputPath,
           scale: widget.scale,
           preserveTransparency: widget.preserveTransparency,
-          denoise: widget.denoise,
+          denoise: widget.denoise == .2 ? performanceDenoise : widget.denoise,
           sharpness: widget.sharpness,
-          detail: widget.detail,
+          detail: widget.detail == .5 ? performanceDetail : widget.detail,
           colorFidelity: widget.colorFidelity,
+          outputFormat: widget.outputFormat,
+          tileSize: widget.tileSize,
+          preserveMetadata: widget.preserveMetadata,
         ),
       );
       if (!mounted || _cancelled) return;
@@ -1234,9 +1329,14 @@ class _AssistantPlan {
 }
 
 class GroqAssistantScreen extends StatefulWidget {
-  const GroqAssistantScreen({super.key, required this.onEnhanced});
+  const GroqAssistantScreen({
+    super.key,
+    required this.onEnhanced,
+    required this.settings,
+  });
 
   final ValueChanged<Enhancement> onEnhanced;
+  final AppSettings settings;
 
   @override
   State<GroqAssistantScreen> createState() => _GroqAssistantScreenState();
@@ -1312,7 +1412,7 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
           ? await prepareVisionImage(selectedPath)
           : null;
       final requestBody = <String, dynamic>{
-        'model': hasImage ? 'qwen/qwen3.6-27b' : 'llama-3.1-8b-instant',
+        'model': hasImage ? 'qwen/qwen3.6-27b' : 'openai/gpt-oss-20b',
         'temperature': 0.25,
         'max_completion_tokens': 700,
         'messages': [
@@ -1411,6 +1511,10 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
           sharpness: plan.sharpness,
           detail: plan.detail,
           colorFidelity: plan.colorFidelity,
+          outputFormat: widget.settings.outputFormat.engineValue,
+          tileSize: widget.settings.engineTileSize,
+          performance: widget.settings.performance,
+          preserveMetadata: widget.settings.preserveMetadata,
           onEnhanced: widget.onEnhanced,
         ),
       ),
@@ -1583,19 +1687,99 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
 }
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key, required this.onClearHistory});
+  const SettingsScreen({
+    super.key,
+    required this.onClearHistory,
+    required this.settings,
+    required this.onSettingsChanged,
+  });
 
   final VoidCallback onClearHistory;
+  final AppSettings settings;
+  final ValueChanged<AppSettings> onSettingsChanged;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool _saveHistory = true;
-  bool _metadata = true;
-  bool _reduceMotion = false;
-  int _performance = 0;
+  String _version = '1.6.0';
+
+  @override
+  void initState() {
+    super.initState();
+    PackageInfo.fromPlatform().then((info) {
+      if (mounted) setState(() => _version = info.version);
+    });
+  }
+
+  void _change(AppSettings settings) => widget.onSettingsChanged(settings);
+
+  Future<void> _chooseFormat() async {
+    final selected = await showModalBottomSheet<OutputFormat>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(title: Text('Default output format')),
+            for (final format in OutputFormat.values)
+              ListTile(
+                title: Text(format.label),
+                subtitle: Text(switch (format) {
+                  OutputFormat.automatic =>
+                    'JPEG for opaque images, PNG for transparency.',
+                  OutputFormat.jpeg =>
+                    'Smaller files with high-quality compression.',
+                  OutputFormat.png => 'Lossless output with larger files.',
+                }),
+                trailing: format == widget.settings.outputFormat
+                    ? const Icon(Icons.check_rounded)
+                    : null,
+                onTap: () => Navigator.pop(context, format),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (selected != null) {
+      _change(widget.settings.copyWith(outputFormat: selected));
+    }
+  }
+
+  Future<void> _chooseTileSize() async {
+    final selected = await showModalBottomSheet<int>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(title: Text('AI tile size')),
+            for (final tile in const [0, 128, 192, 256])
+              ListTile(
+                title: Text(tile == 0 ? 'Automatic' : '$tile px'),
+                subtitle: Text(
+                  tile == 128
+                      ? 'Lowest memory; slower due to more tiles.'
+                      : tile == 256
+                      ? 'Fastest; uses the most working memory.'
+                      : tile == 192
+                      ? 'Balanced manual tile size.'
+                      : 'AniScale chooses the recommended 256 px tile.',
+                ),
+                trailing: tile == widget.settings.tileSize
+                    ? const Icon(Icons.check_rounded)
+                    : null,
+                onTap: () => Navigator.pop(context, tile),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (selected != null) {
+      _change(widget.settings.copyWith(tileSize: selected));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1609,17 +1793,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
         GlassCard(
           child: Column(
             children: [
-              const SettingRow(
+              SettingRow(
                 icon: Icons.image_outlined,
                 title: 'Default format',
-                value: 'Automatic',
+                value: widget.settings.outputFormat.label,
+                onTap: _chooseFormat,
               ),
               const Divider(color: AniColors.border, height: 1),
               SwitchListTile.adaptive(
                 title: const Text('Preserve metadata'),
-                value: _metadata,
+                value: widget.settings.preserveMetadata,
                 activeTrackColor: AniColors.purple,
-                onChanged: (v) => setState(() => _metadata = v),
+                onChanged: (value) =>
+                    _change(widget.settings.copyWith(preserveMetadata: value)),
               ),
             ],
           ),
@@ -1630,18 +1816,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
         GlassCard(
           child: Column(
             children: [
-              const SettingRow(
+              SettingRow(
                 icon: Icons.grid_view_rounded,
                 title: 'Tile size',
-                value: 'Automatic',
+                value: widget.settings.tileSizeLabel,
+                onTap: _chooseTileSize,
               ),
               const Divider(color: AniColors.border, height: 1),
               Padding(
                 padding: const EdgeInsets.all(14),
                 child: SegmentedGlass(
                   labels: const ['Balanced', 'Quality', 'Faster'],
-                  selected: _performance,
-                  onSelected: (i) => setState(() => _performance = i),
+                  selected: widget.settings.performance,
+                  onSelected: (value) =>
+                      _change(widget.settings.copyWith(performance: value)),
                 ),
               ),
             ],
@@ -1655,16 +1843,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               SwitchListTile.adaptive(
                 title: const Text('Save processing history'),
-                value: _saveHistory,
+                value: widget.settings.saveHistory,
                 activeTrackColor: AniColors.purple,
-                onChanged: (v) => setState(() => _saveHistory = v),
+                onChanged: (value) =>
+                    _change(widget.settings.copyWith(saveHistory: value)),
               ),
               const Divider(color: AniColors.border, height: 1),
               SwitchListTile.adaptive(
                 title: const Text('Reduce animations'),
-                value: _reduceMotion,
+                value: widget.settings.reduceMotion,
                 activeTrackColor: AniColors.purple,
-                onChanged: (v) => setState(() => _reduceMotion = v),
+                onChanged: (value) =>
+                    _change(widget.settings.copyWith(reduceMotion: value)),
               ),
               const Divider(color: AniColors.border, height: 1),
               ListTile(
@@ -1696,22 +1886,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: 20),
         const ControlLabel('ABOUT'),
         const SizedBox(height: 9),
-        const GlassCard(
+        GlassCard(
           child: Column(
             children: [
               SettingRow(
                 icon: Icons.info_outline_rounded,
                 title: 'About AniScale',
-                value: '1.4.0',
+                value: _version,
               ),
-              Divider(color: AniColors.border, height: 1),
+              const Divider(color: AniColors.border, height: 1),
               SettingRow(
                 icon: Icons.memory_rounded,
                 title: 'Upscale engine',
-                value: 'Real-ESRGAN Core ML',
+                value: Platform.isIOS
+                    ? 'Real-ESRGAN Core ML'
+                    : 'Mobile resampler',
               ),
-              Divider(color: AniColors.border, height: 1),
-              SettingRow(
+              const Divider(color: AniColors.border, height: 1),
+              const SettingRow(
                 icon: Icons.description_outlined,
                 title: 'Open-source licences',
                 value: '',
@@ -1876,8 +2068,9 @@ class _GlassBackdrop extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final effectiveBlur = MediaQuery.disableAnimationsOf(context) ? 0.0 : blur;
     return BackdropFilter(
-      filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+      filter: ImageFilter.blur(sigmaX: effectiveBlur, sigmaY: effectiveBlur),
       child: ColoredBox(color: tint),
     );
   }
@@ -1929,17 +2122,14 @@ class BrandHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            gradient: aniGradient,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: const Icon(
-            Icons.auto_awesome_rounded,
-            size: 18,
-            color: Colors.black,
+        ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Image.asset(
+            'assets/aniscale_logo.jpg',
+            width: 34,
+            height: 34,
+            fit: BoxFit.cover,
+            cacheWidth: 102,
           ),
         ),
         const SizedBox(width: 10),
@@ -2091,7 +2281,11 @@ class SegmentedGlass extends StatelessWidget {
               child: GestureDetector(
                 onTap: () => onSelected(index),
                 child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 140),
+                  duration: Duration(
+                    milliseconds: MediaQuery.disableAnimationsOf(context)
+                        ? 0
+                        : 140,
+                  ),
                   curve: Curves.easeOutCubic,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
@@ -2190,7 +2384,11 @@ class FloatingNav extends StatelessWidget {
                   borderRadius: BorderRadius.circular(17),
                   onTap: () => onSelected(index),
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 140),
+                    duration: Duration(
+                      milliseconds: MediaQuery.disableAnimationsOf(context)
+                          ? 0
+                          : 140,
+                    ),
                     curve: Curves.easeOutCubic,
                     decoration: BoxDecoration(
                       gradient: active ? aniGradient : null,
@@ -2292,7 +2490,10 @@ class BottomAction extends StatelessWidget {
   Widget build(BuildContext context) {
     return ClipRRect(
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+        filter: ImageFilter.blur(
+          sigmaX: MediaQuery.disableAnimationsOf(context) ? 0 : 8,
+          sigmaY: MediaQuery.disableAnimationsOf(context) ? 0 : 8,
+        ),
         child: SafeArea(
           top: false,
           child: Container(
@@ -2518,14 +2719,17 @@ class SettingRow extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.value,
+    this.onTap,
   });
   final IconData icon;
   final String title;
   final String value;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
+      onTap: onTap,
       leading: Icon(icon, color: AniColors.lavender),
       title: Text(title),
       trailing: Row(
@@ -2533,12 +2737,14 @@ class SettingRow extends StatelessWidget {
         children: [
           if (value.isNotEmpty)
             Text(value, style: const TextStyle(color: AniColors.mutedText)),
-          const SizedBox(width: 4),
-          const Icon(
-            Icons.chevron_right_rounded,
-            color: AniColors.mutedText,
-            size: 19,
-          ),
+          if (onTap != null) ...[
+            const SizedBox(width: 4),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: AniColors.mutedText,
+              size: 19,
+            ),
+          ],
         ],
       ),
     );

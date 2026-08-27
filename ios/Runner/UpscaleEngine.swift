@@ -10,7 +10,6 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
   static let methodChannelName = "app.aniscale/upscaler"
   static let progressChannelName = "app.aniscale/upscaler_progress"
 
-  private let tileSize = 256
   private let modelSize = 266
   private let nativeScale = 4
   private let overlap = 16
@@ -53,6 +52,10 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         let sharpness = (arguments["sharpness"] as? NSNumber)?.doubleValue ?? 0.2
         let detail = (arguments["detail"] as? NSNumber)?.doubleValue ?? 0.5
         let colorFidelity = (arguments["colorFidelity"] as? NSNumber)?.doubleValue ?? 0.9
+        let outputFormat = arguments["outputFormat"] as? String ?? "automatic"
+        let requestedTileSize = arguments["tileSize"] as? Int ?? 256
+        let tileSize = [128, 192, 256].contains(requestedTileSize) ? requestedTileSize : 256
+        let preserveMetadata = arguments["preserveMetadata"] as? Bool ?? true
         setCancelled(false)
         DispatchQueue.global(qos: .userInitiated).async {
           do {
@@ -63,7 +66,10 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
               denoise: denoise,
               sharpness: sharpness,
               detail: detail,
-              colorFidelity: colorFidelity
+              colorFidelity: colorFidelity,
+              outputFormat: outputFormat,
+              tileSize: tileSize,
+              preserveMetadata: preserveMetadata
             )
             DispatchQueue.main.async { result(response) }
           } catch let error as EngineError {
@@ -87,13 +93,16 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           return
         }
         let efficient = arguments["efficient"] as? Bool ?? true
+        let requestedTileSize = arguments["tileSize"] as? Int ?? 256
+        let tileSize = [128, 192, 256].contains(requestedTileSize) ? requestedTileSize : 256
         setCancelled(false)
         DispatchQueue.global(qos: .userInitiated).async {
           do {
             let response = try self.upscaleVideo(
               path: path,
               scale: scale,
-              efficient: efficient
+              efficient: efficient,
+              tileSize: tileSize
             )
             DispatchQueue.main.async { result(response) }
           } catch let error as EngineError {
@@ -135,10 +144,18 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     denoise: Double,
     sharpness: Double,
     detail: Double,
-    colorFidelity: Double
+    colorFidelity: Double,
+    outputFormat: String,
+    tileSize: Int,
+    preserveMetadata: Bool
   ) throws -> [String: Any] {
     guard let image = UIImage(contentsOfFile: path) else {
       throw EngineError("decode_failed", "This image could not be decoded.")
+    }
+    var metadata: CFDictionary?
+    if preserveMetadata,
+       let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil) {
+      metadata = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
     }
     return try upscale(
       image: image,
@@ -148,6 +165,9 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       sharpness: sharpness,
       detail: detail,
       colorFidelity: colorFidelity,
+      outputFormat: outputFormat,
+      tileSize: tileSize,
+      metadata: metadata,
       tileProgress: { [weak self] value in self?.emitProgress(value) }
     )
   }
@@ -160,6 +180,9 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     sharpness: Double = 0.2,
     detail: Double = 0.5,
     colorFidelity: Double = 0.9,
+    outputFormat: String = "automatic",
+    tileSize: Int = 256,
+    metadata: CFDictionary? = nil,
     tileProgress: ((Double) -> Void)?
   ) throws -> [String: Any] {
     let originalWidth = Int(image.size.width * image.scale)
@@ -199,8 +222,8 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       )
     }
 
-    let xStarts = tileStarts(total: width)
-    let yStarts = tileStarts(total: height)
+    let xStarts = tileStarts(total: width, tileSize: tileSize)
+    let yStarts = tileStarts(total: height, tileSize: tileSize)
     let totalTiles = xStarts.count * yStarts.count
     var output = [UInt8](repeating: 0, count: outputWidth * outputHeight * 4)
     let inputArray = try MLMultiArray(
@@ -265,7 +288,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           sourcePixels: source.pixels,
           sourceWidth: width,
           sourceHeight: height,
-          preserveTransparency: preserveTransparency,
+          preserveTransparency: preserveTransparency && outputFormat != "jpeg",
           sharpness: sharpness,
           detail: detail,
           colorFidelity: colorFidelity
@@ -286,7 +309,9 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     ), let cgImage = context.makeImage() else {
       throw EngineError("encode_failed", "The enhanced image could not be assembled.")
     }
-    let usePNG = preserveTransparency && hasTransparency(source.pixels)
+    let usePNG = outputFormat == "png" || (
+      outputFormat == "automatic" && preserveTransparency && hasTransparency(source.pixels)
+    )
     let outputType = usePNG ? UTType.png : UTType.jpeg
     let outputURL = FileManager.default.temporaryDirectory
       .appendingPathComponent("aniscale_\(UUID().uuidString).\(usePNG ? "png" : "jpg")")
@@ -300,9 +325,14 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     else {
       throw EngineError("encode_failed", "The enhanced image could not be saved.")
     }
-    let properties: CFDictionary? = usePNG
-      ? nil
-      : [kCGImageDestinationLossyCompressionQuality: 0.96] as CFDictionary
+    var encodedProperties = metadata as? [String: Any] ?? [:]
+    encodedProperties[kCGImagePropertyOrientation as String] = 1
+    encodedProperties[kCGImagePropertyPixelWidth as String] = outputWidth
+    encodedProperties[kCGImagePropertyPixelHeight as String] = outputHeight
+    if !usePNG {
+      encodedProperties[kCGImageDestinationLossyCompressionQuality as String] = 0.96
+    }
+    let properties = encodedProperties as CFDictionary
     CGImageDestinationAddImage(destination, cgImage, properties)
     guard CGImageDestinationFinalize(destination) else {
       throw EngineError("encode_failed", "The enhanced image could not be saved.")
@@ -322,7 +352,8 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
   private func upscaleVideo(
     path: String,
     scale: Int,
-    efficient: Bool
+    efficient: Bool,
+    tileSize: Int
   ) throws -> [String: Any] {
     let sourceURL = URL(fileURLWithPath: path)
     let asset = AVAsset(url: sourceURL)
@@ -457,6 +488,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           image: UIImage(cgImage: frameImage),
           requestedScale: aiScale,
           preserveTransparency: false,
+          tileSize: tileSize,
           tileProgress: { [weak self] tile in
             self?.emitProgress(min(0.92, frameStart + tile * frameStep))
           }
@@ -745,7 +777,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     }
   }
 
-  private func tileStarts(total: Int) -> [Int] {
+  private func tileStarts(total: Int, tileSize: Int) -> [Int] {
     if total <= tileSize { return [0] }
     let stride = tileSize - overlap
     var starts = [Int]()
