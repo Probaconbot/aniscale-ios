@@ -87,7 +87,7 @@ Future<VideoUpscaleResult> upscaleVideoLocally({
     outputWidth: response['outputWidth'] as int,
     outputHeight: response['outputHeight'] as int,
     durationSeconds: (response['durationSeconds'] as num).toDouble(),
-    engine: response['engine'] as String? ?? 'Core Image GPU',
+    engine: response['engine'] as String? ?? 'Real-ESRGAN Core ML',
   );
 }
 

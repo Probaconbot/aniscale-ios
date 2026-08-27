@@ -8,16 +8,16 @@ AniScale is a private, offline-first image and video enhancer for iPhone.
   with a compatible material fallback on earlier iOS releases
 - Image picker for PNG, JPG, and WebP
 - Local 2× and 4× Real-ESRGAN Anime 6B image upscaling through Core ML
-- Local 2× and 4× GPU video enhancement with progress, cancellation, original audio, and
+- Local 2× and 4× Real-ESRGAN video enhancement with progress, cancellation, original audio, and
   automatic encoder-safe 4K fitting for oversized 4× outputs
 - Editor controls for scale, content style, noise, sharpness, and detail
 - Processing, before/after comparison, local history, settings, save, and share flows
 - No uploads, account, watermark, or cloud API
 
-The iOS image engine runs a fixed-shape Core ML conversion of the official Real-ESRGAN anime 6B
-weights in overlapping tiles. The video engine currently uses Core Image Lanczos on the iPhone GPU
-and automatically fits oversized results into an encoder-safe 4K canvas. Video enhancement is
-local, but is not yet an AI frame model.
+The iOS image and video engines run a fixed-shape Core ML conversion of the official Real-ESRGAN
+anime 6B weights in overlapping tiles. Video frames are decoded with AVFoundation, cleaned by the
+neural model, re-encoded locally, and muxed with their original audio. Oversized results are fitted
+into an encoder-safe 4K canvas.
 
 ## Run
 

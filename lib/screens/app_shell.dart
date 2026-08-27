@@ -279,9 +279,9 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                 child: ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(Icons.bolt_rounded, color: AniColors.blue),
-                  title: Text('Local GPU video enhancement'),
+                  title: Text('Real-ESRGAN video AI'),
                   subtitle: Text(
-                    'Every frame is enhanced on this iPhone and the original audio is preserved. Oversized 4× results automatically fit the largest safe 4K output.',
+                    'Anime and stylized 3D frames are cleaned and upscaled with Core ML. Original audio is preserved and oversized results fit a safe 4K output.',
                   ),
                 ),
               ),
@@ -297,7 +297,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
       ),
       bottomNavigationBar: BottomAction(
         label: 'Start Video Upscaling',
-        note: 'Keep AniScale open while frames are processed locally.',
+        note: 'Real AI processes every frame. Keep AniScale open; this can take a while.',
         onPressed: () => Navigator.of(context).push(
           MaterialPageRoute<void>(
             builder: (_) => VideoProcessingScreen(
@@ -417,7 +417,7 @@ class _VideoProcessingScreenState extends State<VideoProcessingScreen> {
                       ),
                       const SizedBox(height: 24),
                       const Text(
-                        'Enhancing video frames…',
+                        'AI-cleaning video frames…',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 21,

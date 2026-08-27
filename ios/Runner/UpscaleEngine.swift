@@ -116,7 +116,24 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     requestedScale: Int,
     preserveTransparency: Bool
   ) throws -> [String: Any] {
-    guard let image = UIImage(contentsOfFile: path), let source = normalizedRGBA(image) else {
+    guard let image = UIImage(contentsOfFile: path) else {
+      throw EngineError("decode_failed", "This image could not be decoded.")
+    }
+    return try upscale(
+      image: image,
+      requestedScale: requestedScale,
+      preserveTransparency: preserveTransparency,
+      reportsTileProgress: true
+    )
+  }
+
+  private func upscale(
+    image: UIImage,
+    requestedScale: Int,
+    preserveTransparency: Bool,
+    reportsTileProgress: Bool
+  ) throws -> [String: Any] {
+    guard let source = normalizedRGBA(image) else {
       throw EngineError("decode_failed", "This image could not be decoded.")
     }
     let width = source.width
@@ -198,7 +215,9 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           preserveTransparency: preserveTransparency
         )
         completed += 1
-        emitProgress(Double(completed) / Double(totalTiles))
+        if reportsTileProgress {
+          emitProgress(Double(completed) / Double(totalTiles))
+        }
       }
     }
 
@@ -313,6 +332,10 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     writer.startSession(atSourceTime: .zero)
 
     let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+    // Use the 4× neural output when the final canvas retains at least 3× of
+    // the source resolution. For 1080p sources, 2× already fills the 4K
+    // hardware encoder limit and avoids generating a wasteful 8K frame first.
+    let aiScale = outputWidth >= sourceWidth * 3 ? 4 : 2
     while let sample = readerOutput.copyNextSampleBuffer() {
       if isCancelled() {
         reader.cancelReading()
@@ -336,20 +359,46 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         throw EngineError("video_memory", "The iPhone ran out of video processing memory.")
       }
 
-      autoreleasepool {
+      try autoreleasepool {
         var frame = CIImage(cvPixelBuffer: inputBuffer).transformed(by: videoTrack.preferredTransform)
         frame = frame.transformed(
           by: CGAffineTransform(translationX: -frame.extent.minX, y: -frame.extent.minY)
         )
-        frame = frame.applyingFilter(
-          "CILanczosScaleTransform",
-          parameters: [
-            kCIInputScaleKey: CGFloat(outputWidth) / CGFloat(sourceWidth),
-            kCIInputAspectRatioKey: 1.0
-          ]
+        guard let frameImage = ciContext.createCGImage(frame, from: frame.extent) else {
+          throw EngineError(
+            "video_frame_decode",
+            "A video frame could not be decoded for AI processing."
+          )
+        }
+        let enhanced = try upscale(
+          image: UIImage(cgImage: frameImage),
+          requestedScale: aiScale,
+          preserveTransparency: false,
+          reportsTileProgress: false
         )
+        guard let enhancedPath = enhanced["path"] as? String else {
+          throw EngineError("video_frame_encode", "The AI engine returned no enhanced frame.")
+        }
+        let enhancedURL = URL(fileURLWithPath: enhancedPath)
+        defer { try? FileManager.default.removeItem(at: enhancedURL) }
+        guard var enhancedFrame = CIImage(contentsOf: enhancedURL) else {
+          throw EngineError(
+            "video_frame_encode",
+            "An AI-enhanced frame could not be reopened."
+          )
+        }
+        let fitScale = min(
+          CGFloat(outputWidth) / enhancedFrame.extent.width,
+          CGFloat(outputHeight) / enhancedFrame.extent.height
+        )
+        if abs(fitScale - 1) > 0.001 {
+          enhancedFrame = enhancedFrame.applyingFilter(
+            "CILanczosScaleTransform",
+            parameters: [kCIInputScaleKey: fitScale, kCIInputAspectRatioKey: 1.0]
+          )
+        }
         ciContext.render(
-          frame,
+          enhancedFrame,
           to: outputBuffer,
           bounds: CGRect(x: 0, y: 0, width: outputWidth, height: outputHeight),
           colorSpace: CGColorSpaceCreateDeviceRGB()
@@ -381,7 +430,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       "outputWidth": outputWidth,
       "outputHeight": outputHeight,
       "durationSeconds": durationSeconds,
-      "engine": "Core Image Lanczos (GPU)"
+      "engine": "Real-ESRGAN Anime/3D (Core ML)"
     ]
   }
 
