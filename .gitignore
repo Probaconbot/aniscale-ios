@@ -50,6 +50,8 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 /android/.kotlin/
+/android/app/src/main/cpp/ncnn-android-vulkan/
+/android/app/src/main/assets/models/
 
 # Widget Preview related
 .widget_preview/

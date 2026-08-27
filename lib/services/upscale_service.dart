@@ -75,12 +75,16 @@ class VideoUpscaleResult {
 }
 
 Future<UpscaleResult> upscaleLocally(UpscaleRequest request) {
-  if (Platform.isIOS) return _upscaleWithCoreML(request);
+  if (Platform.isIOS || Platform.isAndroid) {
+    return _upscaleWithNativeAI(request);
+  }
   return compute(_resizeImage, request);
 }
 
 Future<void> cancelUpscale() async {
-  if (Platform.isIOS) await _upscaleChannel.invokeMethod<void>('cancel');
+  if (Platform.isIOS || Platform.isAndroid) {
+    await _upscaleChannel.invokeMethod<void>('cancel');
+  }
 }
 
 Future<VideoUpscaleResult> upscaleVideoLocally({
@@ -90,9 +94,9 @@ Future<VideoUpscaleResult> upscaleVideoLocally({
   required int tileSize,
   required String engine,
 }) async {
-  if (!Platform.isIOS) {
+  if (!Platform.isIOS && !Platform.isAndroid) {
     throw UnsupportedError(
-      'Local video upscaling is currently available on iOS.',
+      'Local video upscaling is available on iOS and Android.',
     );
   }
   final response = await _upscaleChannel.invokeMapMethod<String, dynamic>(
@@ -120,7 +124,7 @@ Future<VideoUpscaleResult> upscaleVideoLocally({
   );
 }
 
-Future<UpscaleResult> _upscaleWithCoreML(UpscaleRequest request) async {
+Future<UpscaleResult> _upscaleWithNativeAI(UpscaleRequest request) async {
   final response = await _upscaleChannel.invokeMapMethod<String, dynamic>(
     'upscaleImage',
     {

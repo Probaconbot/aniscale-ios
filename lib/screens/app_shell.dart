@@ -237,7 +237,7 @@ class VideoSelectedScreen extends StatefulWidget {
   State<VideoSelectedScreen> createState() => _VideoSelectedScreenState();
 }
 
-enum _VideoEngine { fusion, render }
+enum _VideoEngine { fusion, render, turbo }
 
 class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
   int _scale = 2;
@@ -320,16 +320,18 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
               const ControlLabel('VIDEO ENGINE'),
               const SizedBox(height: 9),
               SegmentedGlass(
-                labels: const ['Fusion', 'Render'],
+                labels: const ['Fusion', 'Render', 'Turbo'],
                 selected: _engine.index,
                 onSelected: (index) =>
                     setState(() => _engine = _VideoEngine.values[index]),
               ),
               const SizedBox(height: 8),
               Text(
-                _engine == _VideoEngine.fusion
-                    ? 'AniScale Fusion — tuned for anime and stylized 3D, with a smaller neural model for better speed.'
-                    : 'AniScale Render — a heavier 23-block model for clean 3D surfaces, sharper geometry, and restrained noise.',
+                switch (_engine) {
+                  _VideoEngine.fusion => 'AniScale Fusion — tuned for anime and stylized 3D with strong, faithful detail.',
+                  _VideoEngine.render => 'AniScale Render — a heavier 23-block model for clean 3D surfaces, sharper geometry, and restrained noise.',
+                  _VideoEngine.turbo => 'AniScale Turbo — a compact video model for faster processing and lower heat.',
+                },
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   color: AniColors.mutedText,
@@ -372,19 +374,13 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                     Icons.bolt_rounded,
                     color: AniColors.blue,
                   ),
-                  title: Text(
-                    Platform.isIOS
-                        ? _engine == _VideoEngine.fusion
-                              ? 'AniScale Fusion — Anime & 3D'
-                              : 'AniScale Render — 3D'
-                        : 'Android video engine',
-                  ),
+                  title: Text(switch (_engine) {
+                    _VideoEngine.fusion => 'AniScale Fusion — Anime & 3D',
+                    _VideoEngine.render => 'AniScale Render — 3D',
+                    _VideoEngine.turbo => 'AniScale Turbo — Fast',
+                  }),
                   subtitle: Text(
-                    Platform.isIOS
-                        ? _engine == _VideoEngine.fusion
-                              ? 'Anime and stylized 3D frames are cleaned with a faster Core ML model. Original audio is preserved and oversized results fit a safe 4K output.'
-                              : 'A separate, heavier general-image model cleans 3D surfaces and geometry. Original audio is preserved and oversized results fit a safe 4K output.'
-                        : 'Video enhancement is not available in this Android build yet. Image enhancement and Assistant recipes are available.',
+                    '${Platform.isIOS ? 'Core ML' : 'ncnn Vulkan'} processes every frame locally. Original audio is preserved and oversized results fit a safe 4K output.',
                   ),
                 ),
               ),
@@ -401,7 +397,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
       bottomNavigationBar: BottomAction(
         label: 'Start Video Upscaling',
         note: 'Real AI processes every frame. Keep AniScale open; this can take a while.',
-        onPressed: Platform.isIOS
+        onPressed: Platform.isIOS || Platform.isAndroid
             ? () => Navigator.of(context).push(
                 MaterialPageRoute<void>(
                   builder: (_) => VideoProcessingScreen(
@@ -1815,7 +1811,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  String _version = '1.7.0';
+  String _version = '1.8.0';
 
   @override
   void initState() {
@@ -2011,7 +2007,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 icon: Icons.memory_rounded,
                 title: 'Upscale engine',
                 value: Platform.isIOS
-                    ? 'AniScale Fusion + Render'
+                    ? 'Fusion + Render + Turbo'
+                    : Platform.isAndroid
+                    ? 'Fusion + Render + Turbo (ncnn)'
                     : 'Mobile resampler',
               ),
               const Divider(color: AniColors.border, height: 1),

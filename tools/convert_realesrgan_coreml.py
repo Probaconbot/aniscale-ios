@@ -29,6 +29,7 @@ MODELS = (
         "sha256": "f872d837d3c90ed2e05227bed711af5671a6fd1c9f7d7e91c911a61f155e99da",
         "blocks": 6,
         "description": "4x anime and stylized 3D super-resolution",
+        "architecture": "rrdb",
     },
     {
         "name": "Render",
@@ -41,6 +42,20 @@ MODELS = (
         "sha256": "4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1",
         "blocks": 23,
         "description": "4x general and 3D render super-resolution",
+        "architecture": "rrdb",
+    },
+    {
+        "name": "Turbo",
+        "weights": MODEL_DIR / "realesr-animevideov3.pth",
+        "output": MODEL_DIR / "AniScale_turbo_animevideo_266_fp16.mlpackage",
+        "url": (
+            "https://github.com/xinntao/Real-ESRGAN/releases/download/"
+            "v0.2.5.0/realesr-animevideov3.pth"
+        ),
+        "sha256": "b8a8376811077954d82ca3fcf476f1ac3da3e8a68a4f4d71363008000a18b75d",
+        "blocks": 16,
+        "description": "4x compact anime video super-resolution",
+        "architecture": "srvgg",
     },
 )
 
@@ -109,6 +124,25 @@ class RRDBNet(nn.Module):
         return self.conv_last(functional.leaky_relu(self.conv_hr(features), 0.2))
 
 
+class SRVGGNetCompact(nn.Module):
+    def __init__(self, num_conv: int = 16, upscale: int = 4):
+        super().__init__()
+        body = [nn.Conv2d(3, 64, 3, 1, 1), nn.PReLU(num_parameters=64)]
+        for _ in range(num_conv):
+            body.extend(
+                [nn.Conv2d(64, 64, 3, 1, 1), nn.PReLU(num_parameters=64)]
+            )
+        body.append(nn.Conv2d(64, 3 * upscale * upscale, 3, 1, 1))
+        self.body = nn.Sequential(*body)
+        self.upsampler = nn.PixelShuffle(upscale)
+        self.upscale = upscale
+
+    def forward(self, value):
+        output = self.upsampler(self.body(value))
+        base = functional.interpolate(value, scale_factor=self.upscale, mode="nearest")
+        return output + base
+
+
 def convert_model(spec):
     output = spec["output"]
     weights = spec["weights"]
@@ -123,7 +157,11 @@ def convert_model(spec):
         weights.unlink(missing_ok=True)
         raise RuntimeError(f"Real-ESRGAN weights checksum mismatch: {digest}")
 
-    network = RRDBNet(spec["blocks"])
+    network = (
+        SRVGGNetCompact(spec["blocks"])
+        if spec["architecture"] == "srvgg"
+        else RRDBNet(spec["blocks"])
+    )
     checkpoint = torch.load(weights, map_location="cpu", weights_only=True)
     network.load_state_dict(checkpoint.get("params_ema", checkpoint), strict=True)
     network.eval()

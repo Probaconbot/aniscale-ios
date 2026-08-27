@@ -1,7 +1,6 @@
 # AniScale
 
-AniScale is a private, offline-first image enhancer for iPhone and Android, with local video
-enhancement currently available on iPhone.
+AniScale is a private, offline-first image and video enhancer for iPhone and Android.
 
 ## Current build
 
@@ -10,9 +9,9 @@ enhancement currently available on iPhone.
 - Image picker for PNG, JPG, and WebP
 - Local 2× and 4× AniScale Fusion image upscaling through Core ML with automatic
   memory-safe fitting for large camera images
-- Local 2× and 4× video enhancement with AniScale Fusion for anime/stylized 3D and the separate,
-  heavier AniScale Render model for general 3D, with progress, cancellation, original audio,
-  automatic encoder-safe 4K fitting, and Efficient and Maximum modes
+- Local 2× and 4× video enhancement with AniScale Fusion for anime/stylized 3D, the separate heavy
+  AniScale Render model for general 3D, and compact AniScale Turbo for lower heat, with progress,
+  cancellation, original audio, automatic encoder-safe 4K fitting, and Efficient and Maximum modes
 - Processing, before/after comparison, local history, settings, save, and share flows
 - Local upscaling never uploads media; no account or watermark
 - Optional Groq vision planning: attach an image and describe the result, then review a structured
@@ -22,17 +21,17 @@ enhancement currently available on iPhone.
 - Users enter their own Groq key and it remains in memory only for the current app session; prompts
   and a reduced preview are sent to Groq only after the user taps send
 
-The iOS engines run fixed-shape Core ML conversions of the official Real-ESRGAN anime 6B and
-general x4plus weights in overlapping tiles. Both downloads are checksum-verified during the
+The iOS engines run fixed-shape Core ML conversions of the official Real-ESRGAN anime 6B,
+general x4plus, and AnimeVideo-v3 weights in overlapping tiles. Downloads are checksum-verified during the
 build. Assistant recipes tune pre-model cleanup and faithful reconstruction without pretending
 that the language model edits pixels. Video frames are decoded with AVFoundation, cleaned by the
 selected neural model, re-encoded locally, and muxed with their original audio. Oversized results
 are fitted into an encoder-safe 4K canvas.
 
-The Android beta includes the same UI, assistant recipe workflow, settings, image selection,
-memory-safe 2×/4× output, saving, sharing, and history. It currently uses AniScale's mobile image
-resampler; the Core ML model and local video engine remain iOS-only until an Android neural runtime
-is integrated.
+Android uses ncnn with Vulkan acceleration and three bundled neural video models: AniScale Fusion
+for anime and stylized 3D, AniScale Render for general 3D, and compact AniScale Turbo for faster,
+lower-heat processing. Frames are decoded and encoded with Android media APIs and original audio is
+muxed into the local result. The same native Fusion runtime now handles Android image upscaling.
 
 ## Run
 

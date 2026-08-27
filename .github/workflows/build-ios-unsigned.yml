@@ -45,6 +45,7 @@ jobs:
           path: |
             ios/Runner/Models/RealESRGAN_anime_6B_266_fp16.mlpackage
             ios/Runner/Models/RealESRGAN_render_x4plus_266_fp16.mlpackage
+            ios/Runner/Models/AniScale_turbo_animevideo_266_fp16.mlpackage
           key: coreml-fusion-render-ios15-266-${{ hashFiles('tools/convert_realesrgan_coreml.py') }}
 
       - name: Convert Real-ESRGAN for iPhone
@@ -60,6 +61,7 @@ jobs:
         run: |
           test -f ios/Runner/Models/RealESRGAN_anime_6B_266_fp16.mlpackage/Manifest.json
           test -f ios/Runner/Models/RealESRGAN_render_x4plus_266_fp16.mlpackage/Manifest.json
+          test -f ios/Runner/Models/AniScale_turbo_animevideo_266_fp16.mlpackage/Manifest.json
 
       - name: Analyze project
         shell: bash
@@ -94,6 +96,32 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: Prepare Android ncnn and AniScale models
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/ncnn" "$RUNNER_TEMP/realesrgan"
+          curl -L --fail -o "$RUNNER_TEMP/ncnn.zip" \
+            https://github.com/Tencent/ncnn/releases/download/20260526/ncnn-20260526-android-vulkan.zip
+          echo "26909c92eed35afed4a966b5e9e503fcb0a529691ea3f910ec2c94a4fff52804  $RUNNER_TEMP/ncnn.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/ncnn.zip" -d "$RUNNER_TEMP/ncnn"
+          mkdir -p android/app/src/main/cpp/ncnn-android-vulkan
+          cp -R "$RUNNER_TEMP/ncnn/ncnn-20260526-android-vulkan/." \
+            android/app/src/main/cpp/ncnn-android-vulkan/
+
+          curl -L --fail -o "$RUNNER_TEMP/realesrgan.zip" \
+            https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-ubuntu.zip
+          echo "e5aa6eb131234b87c0c51f82b89390f5e3e642b7b70f2b9bbe95b6a285a40c96  $RUNNER_TEMP/realesrgan.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/realesrgan.zip" -d "$RUNNER_TEMP/realesrgan"
+          mkdir -p android/app/src/main/assets/models
+          cp "$RUNNER_TEMP/realesrgan/models/realesrgan-x4plus-anime.param" android/app/src/main/assets/models/
+          cp "$RUNNER_TEMP/realesrgan/models/realesrgan-x4plus-anime.bin" android/app/src/main/assets/models/
+          cp "$RUNNER_TEMP/realesrgan/models/realesrgan-x4plus.param" android/app/src/main/assets/models/
+          cp "$RUNNER_TEMP/realesrgan/models/realesrgan-x4plus.bin" android/app/src/main/assets/models/
+          cp "$RUNNER_TEMP/realesrgan/models/realesr-animevideov3-x2.param" android/app/src/main/assets/models/
+          cp "$RUNNER_TEMP/realesrgan/models/realesr-animevideov3-x2.bin" android/app/src/main/assets/models/
+          cp "$RUNNER_TEMP/realesrgan/models/realesr-animevideov3-x4.param" android/app/src/main/assets/models/
+          cp "$RUNNER_TEMP/realesrgan/models/realesr-animevideov3-x4.bin" android/app/src/main/assets/models/
 
       - name: Build Android APK
         shell: bash

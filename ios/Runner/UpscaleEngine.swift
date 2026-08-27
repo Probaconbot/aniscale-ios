@@ -34,6 +34,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
 
   private lazy var fusionModel = loadModel(named: "RealESRGAN_anime_6B_266_fp16")
   private lazy var renderModel = loadModel(named: "RealESRGAN_render_x4plus_266_fp16")
+  private lazy var turboModel = loadModel(named: "AniScale_turbo_animevideo_266_fp16")
 
   func register(with messenger: FlutterBinaryMessenger) {
     let methods = FlutterMethodChannel(name: Self.methodChannelName, binaryMessenger: messenger)
@@ -97,7 +98,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         }
         let efficient = arguments["efficient"] as? Bool ?? true
         let engine = arguments["engine"] as? String ?? "fusion"
-        guard engine == "fusion" || engine == "render" else {
+        guard engine == "fusion" || engine == "render" || engine == "turbo" else {
           result(FlutterError(code: "bad_arguments", message: "Unknown video engine.", details: nil))
           return
         }
@@ -367,11 +368,13 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     tileSize: Int,
     engine: String
   ) throws -> [String: Any] {
-    let selectedModel = engine == "render" ? renderModel : fusionModel
-    let engineLabel = engine == "render" ? "AniScale Render" : "AniScale Fusion"
-    let videoDenoise = engine == "render" ? 0.34 : 0.2
-    let videoSharpness = engine == "render" ? 0.34 : 0.26
-    let videoDetail = engine == "render" ? 0.68 : 0.6
+    let selectedModel = engine == "render" ? renderModel : (engine == "turbo" ? turboModel : fusionModel)
+    let engineLabel = engine == "render"
+      ? "AniScale Render"
+      : (engine == "turbo" ? "AniScale Turbo" : "AniScale Fusion")
+    let videoDenoise = engine == "render" ? 0.34 : (engine == "turbo" ? 0.16 : 0.2)
+    let videoSharpness = engine == "render" ? 0.34 : (engine == "turbo" ? 0.2 : 0.26)
+    let videoDetail = engine == "render" ? 0.68 : (engine == "turbo" ? 0.48 : 0.6)
     let sourceURL = URL(fileURLWithPath: path)
     let asset = AVAsset(url: sourceURL)
     guard let videoTrack = asset.tracks(withMediaType: .video).first else {
