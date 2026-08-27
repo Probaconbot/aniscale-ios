@@ -1,0 +1,112 @@
+name: Publish AniScale release
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful mobile build workflow run ID
+        required: true
+        type: string
+      version:
+        description: Release version without the v prefix
+        required: true
+        default: 1.8.0
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    name: Publish APK and IPA
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out AniScale
+        uses: actions/checkout@v4
+
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: AniScale-android-apk
+          path: dist/android
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download unsigned iOS IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: AniScale-unsigned-ipa
+          path: dist/ios
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Prepare named release files
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          mv dist/android/app-release.apk "dist/AniScale-Android-v${VERSION}.apk"
+          mv dist/ios/AniScale-unsigned.ipa "dist/AniScale-iOS-unsigned-v${VERSION}.ipa"
+          cd dist
+          sha256sum "AniScale-Android-v${VERSION}.apk" \
+            "AniScale-iOS-unsigned-v${VERSION}.ipa" > SHA256SUMS.txt
+
+      - name: Write release notes
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          cat > release-notes.md <<EOF
+          ## AniScale ${VERSION} — all engines on Android and iOS
+
+          This release replaces the Android video placeholder with a real, local video-enhancement pipeline and ships the same three selectable AniScale modes on Android and iPhone.
+
+          ### Video engines
+
+          - **AniScale Fusion** — anime and stylized 3D; the quality-first default.
+          - **AniScale Render** — fully rendered 3D and CGI; stronger texture and edge recovery.
+          - **AniScale Turbo** — compact anime-video models with native 2× and 4× paths for faster, cooler processing.
+
+          ### Android
+
+          - Real-ESRGAN inference through ncnn with Vulkan acceleration and CPU fallback.
+          - Fusion, Render, Turbo 2×, and Turbo 4× model files are bundled in the APK.
+          - Video frames are processed locally, encoded to H.264, and remuxed with the source audio.
+          - Image upscaling now uses the native AI engine instead of cubic resizing.
+
+          ### iPhone
+
+          - Fusion, Render, and Turbo are bundled as Core ML models.
+          - The IPA is unsigned and must be signed with your own Apple ID/certificate before installation.
+
+          ### Privacy
+
+          Image and video enhancement runs on the device. Media is not uploaded for processing.
+
+          SHA-256 checksums are included in `SHA256SUMS.txt`.
+          EOF
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          TAG="v${VERSION}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "AniScale ${TAG}" --notes-file release-notes.md
+            gh release upload "$TAG" \
+              "dist/AniScale-Android-v${VERSION}.apk" \
+              "dist/AniScale-iOS-unsigned-v${VERSION}.ipa" \
+              dist/SHA256SUMS.txt --clobber
+          else
+            gh release create "$TAG" \
+              "dist/AniScale-Android-v${VERSION}.apk" \
+              "dist/AniScale-iOS-unsigned-v${VERSION}.ipa" \
+              dist/SHA256SUMS.txt \
+              --target "${GITHUB_SHA}" \
+              --title "AniScale ${TAG}" \
+              --notes-file release-notes.md \
+              --latest
+          fi
