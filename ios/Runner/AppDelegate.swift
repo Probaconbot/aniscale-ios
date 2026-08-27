@@ -16,10 +16,5 @@ import UIKit
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     let engineRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "AniScaleUpscaleEngine")!
     upscaleEngine.register(with: engineRegistrar.messenger())
-    let glassRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "AniScaleNativeLiquidGlass")!
-    glassRegistrar.register(
-      NativeLiquidGlassFactory(messenger: glassRegistrar.messenger()),
-      withId: "app.aniscale/native_liquid_glass"
-    )
   }
 }

@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 
 abstract final class AniColors {
   static const background = Color(0xFF05070C);
-  static const deepNavy = Color(0xFF0A0D16);
-  static const glass = Color(0xB8141725);
-  static const elevatedGlass = Color(0xC71E2237);
-  static const purple = Color(0xFF8B7CFF);
-  static const blue = Color(0xFF50D4FF);
-  static const lavender = Color(0xFFD2CCFF);
-  static const secondaryText = Color(0xFFB8BECC);
-  static const mutedText = Color(0xFF7A8295);
+  static const deepNavy = Color(0xFF101114);
+  static const glass = Color(0xD0121316);
+  static const elevatedGlass = Color(0xF01A1B1F);
+  static const purple = Color(0xFFF7F7F5);
+  static const blue = Color(0xFFD5D7DC);
+  static const lavender = Color(0xFFF7F7F5);
+  static const secondaryText = Color(0xFFB7B9C0);
+  static const mutedText = Color(0xFF747780);
   static const success = Color(0xFF42E6A4);
   static const error = Color(0xFFFF6B81);
   static const border = Color(0x1FFFFFFF);
@@ -30,7 +30,23 @@ abstract final class AppTheme {
       scaffoldBackgroundColor: AniColors.background,
       fontFamily: 'SF Pro Display',
       useMaterial3: true,
-      splashFactory: InkSparkle.splashFactory,
+      splashFactory: InkRipple.splashFactory,
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: const Color(0xFF111216),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: AniColors.border),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: AniColors.border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Colors.white, width: 1.2),
+        ),
+      ),
       textTheme: const TextTheme(
         displaySmall: TextStyle(
           color: Colors.white,
@@ -83,7 +99,7 @@ abstract final class AppTheme {
 }
 
 const aniGradient = LinearGradient(
-  colors: [Color(0xFF806CFF), Color(0xFF4AA9FF), Color(0xFF50D4FF)],
+  colors: [Color(0xFFFFFFFF), Color(0xFFE7E8EB), Color(0xFFC9CCD2)],
   begin: Alignment.topLeft,
   end: Alignment.bottomRight,
 );

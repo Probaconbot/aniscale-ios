@@ -123,7 +123,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       image: image,
       requestedScale: requestedScale,
       preserveTransparency: preserveTransparency,
-      reportsTileProgress: true
+      tileProgress: { [weak self] value in self?.emitProgress(value) }
     )
   }
 
@@ -131,7 +131,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     image: UIImage,
     requestedScale: Int,
     preserveTransparency: Bool,
-    reportsTileProgress: Bool
+    tileProgress: ((Double) -> Void)?
   ) throws -> [String: Any] {
     guard let source = normalizedRGBA(image) else {
       throw EngineError("decode_failed", "This image could not be decoded.")
@@ -215,9 +215,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           preserveTransparency: preserveTransparency
         )
         completed += 1
-        if reportsTileProgress {
-          emitProgress(Double(completed) / Double(totalTiles))
-        }
+        tileProgress?(Double(completed) / Double(totalTiles))
       }
     }
 
@@ -359,6 +357,12 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         throw EngineError("video_memory", "The iPhone ran out of video processing memory.")
       }
 
+      let timestamp = CMSampleBufferGetPresentationTimeStamp(sample)
+      let frameStart = min(0.92, max(0.01, CMTimeGetSeconds(timestamp) / durationSeconds * 0.92))
+      let frameStep = 0.92 / max(
+        1,
+        durationSeconds * Double(max(videoTrack.nominalFrameRate, 1))
+      )
       try autoreleasepool {
         var frame = CIImage(cvPixelBuffer: inputBuffer).transformed(by: videoTrack.preferredTransform)
         frame = frame.transformed(
@@ -374,7 +378,9 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           image: UIImage(cgImage: frameImage),
           requestedScale: aiScale,
           preserveTransparency: false,
-          reportsTileProgress: false
+          tileProgress: { [weak self] tile in
+            self?.emitProgress(min(0.92, frameStart + tile * frameStep))
+          }
         )
         guard let enhancedPath = enhanced["path"] as? String else {
           throw EngineError("video_frame_encode", "The AI engine returned no enhanced frame.")
@@ -404,7 +410,6 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           colorSpace: CGColorSpaceCreateDeviceRGB()
         )
       }
-      let timestamp = CMSampleBufferGetPresentationTimeStamp(sample)
       guard adaptor.append(outputBuffer, withPresentationTime: timestamp) else {
         throw EngineError("video_encode_failed", writer.error?.localizedDescription ?? "A video frame could not be encoded.")
       }

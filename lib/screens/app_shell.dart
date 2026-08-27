@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
 
@@ -32,10 +33,11 @@ class _AppShellState extends State<AppShell> {
     final pages = [
       HomeScreen(
         history: _history,
-        onOpenSettings: () => setState(() => _tab = 2),
+        onOpenSettings: () => setState(() => _tab = 3),
         onEnhanced: _addEnhancement,
       ),
       HistoryScreen(history: _history),
+      const GroqAssistantScreen(),
       SettingsScreen(onClearHistory: () => setState(_history.clear)),
     ];
 
@@ -1153,6 +1155,224 @@ class HistoryScreen extends StatelessWidget {
   }
 }
 
+class GroqAssistantScreen extends StatefulWidget {
+  const GroqAssistantScreen({super.key});
+
+  @override
+  State<GroqAssistantScreen> createState() => _GroqAssistantScreenState();
+}
+
+class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
+  final _keyController = TextEditingController();
+  final _promptController = TextEditingController();
+  final _scrollController = ScrollController();
+  final List<({bool user, String text})> _messages = [];
+  bool _sending = false;
+  bool _showKey = false;
+
+  @override
+  void dispose() {
+    _keyController.dispose();
+    _promptController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _send() async {
+    final key = _keyController.text.trim();
+    final prompt = _promptController.text.trim();
+    if (key.isEmpty || prompt.isEmpty || _sending) return;
+    setState(() {
+      _messages.add((user: true, text: prompt));
+      _sending = true;
+      _promptController.clear();
+    });
+
+    final client = HttpClient();
+    try {
+      final request = await client.postUrl(
+        Uri.parse('https://api.groq.com/openai/v1/chat/completions'),
+      );
+      request.headers.contentType = ContentType.json;
+      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $key');
+      final history = _messages
+          .take(10)
+          .map(
+            (message) => {
+              'role': message.user ? 'user' : 'assistant',
+              'content': message.text,
+            },
+          )
+          .toList();
+      request.add(
+        utf8.encode(
+          jsonEncode({
+            'model': 'llama-3.1-8b-instant',
+            'temperature': 0.25,
+            'max_completion_tokens': 700,
+            'messages': [
+              {
+                'role': 'system',
+                'content': 'You are AniScale Assistant. Help users choose faithful image and video restoration settings. Prioritize artifact removal, natural texture, temporal stability, privacy, and honest limitations. Never claim that text AI performs the upscaling itself.',
+              },
+              ...history,
+            ],
+          }),
+        ),
+      );
+      final response = await request.close();
+      final body = await utf8.decoder.bind(response).join();
+      final decoded = jsonDecode(body) as Map<String, dynamic>;
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        final error = decoded['error'] as Map<String, dynamic>?;
+        throw HttpException(
+          error?['message'] as String? ??
+              'Groq returned ${response.statusCode}.',
+        );
+      }
+      final choices = decoded['choices'] as List<dynamic>?;
+      final message = choices?.firstOrNull as Map<String, dynamic>?;
+      final content =
+          (message?['message'] as Map<String, dynamic>?)?['content'] as String?;
+      if (content == null || content.trim().isEmpty) {
+        throw const FormatException('Groq returned an empty response.');
+      }
+      if (mounted) setState(() => _messages.add((user: false, text: content)));
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _messages.add((
+            user: false,
+            text:
+                'Assistant request failed. Check the key and connection, then try again. ${error is HttpException ? error.message : ''}',
+          )),
+        );
+      }
+    } finally {
+      client.close(force: true);
+      if (mounted) {
+        setState(() => _sending = false);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_scrollController.hasClients) {
+            _scrollController.animateTo(
+              _scrollController.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 240),
+              curve: Curves.easeOut,
+            );
+          }
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 22, 20, 116),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('AI Assistant', style: Theme.of(context).textTheme.displaySmall),
+          const SizedBox(height: 7),
+          const Text('Fast restoration guidance powered by Groq.'),
+          const SizedBox(height: 18),
+          TextField(
+            controller: _keyController,
+            obscureText: !_showKey,
+            autocorrect: false,
+            enableSuggestions: false,
+            decoration: InputDecoration(
+              labelText: 'Groq API key',
+              hintText: 'Paste a new key',
+              helperText: 'Kept in memory only until AniScale closes.',
+              suffixIcon: IconButton(
+                onPressed: () => setState(() => _showKey = !_showKey),
+                icon: Icon(
+                  _showKey
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Expanded(
+            child: _messages.isEmpty
+                ? const GlassCard(
+                    child: Center(
+                      child: Text(
+                        'Ask which mode to use, how to avoid artifacts, or why a clip is taking longer.',
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    controller: _scrollController,
+                    itemCount: _messages.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 10),
+                    itemBuilder: (_, index) {
+                      final message = _messages[index];
+                      return Align(
+                        alignment: message.user
+                            ? Alignment.centerRight
+                            : Alignment.centerLeft,
+                        child: Container(
+                          constraints: const BoxConstraints(maxWidth: 330),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: message.user
+                                ? Colors.white
+                                : AniColors.deepNavy,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(color: AniColors.border),
+                          ),
+                          child: Text(
+                            message.text,
+                            style: TextStyle(
+                              color: message.user ? Colors.black : Colors.white,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _promptController,
+                  minLines: 1,
+                  maxLines: 3,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _send(),
+                  decoration: const InputDecoration(hintText: 'Ask AniScale…'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              IconButton.filled(
+                onPressed: _sending ? null : _send,
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black,
+                  minimumSize: const Size(52, 52),
+                ),
+                icon: _sending
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.arrow_upward_rounded),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key, required this.onClearHistory});
 
@@ -1260,7 +1480,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             leading: Icon(Icons.shield_outlined, color: AniColors.success),
             title: Text('Private by design'),
             subtitle: Text(
-              'All processing is performed locally. Your images and videos are never uploaded.',
+              'Images and videos stay on-device. Assistant prompts are sent to Groq only when you use the Assistant tab.',
             ),
           ),
         ),
@@ -1273,13 +1493,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               SettingRow(
                 icon: Icons.info_outline_rounded,
                 title: 'About AniScale',
-                value: '1.0.0',
+                value: '1.4.0',
               ),
               Divider(color: AniColors.border, height: 1),
               SettingRow(
                 icon: Icons.memory_rounded,
                 title: 'Upscale engine',
-                value: 'Local MVP',
+                value: 'Real-ESRGAN Core ML',
               ),
               Divider(color: AniColors.border, height: 1),
               SettingRow(
@@ -1308,7 +1528,7 @@ class AmbientBackground extends StatelessWidget {
         gradient: RadialGradient(
           center: Alignment(-.7, -1),
           radius: 1.35,
-          colors: [Color(0x3D292060), Color(0xFF090C16), AniColors.background],
+          colors: [Color(0x2BFFFFFF), Color(0xFF0B0C0F), AniColors.background],
           stops: [0, .46, 1],
         ),
       ),
@@ -1324,7 +1544,7 @@ class AmbientBackground extends StatelessWidget {
               decoration: const BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: RadialGradient(
-                  colors: [Color(0x2945C7FF), Colors.transparent],
+                  colors: [Color(0x1FFFFFFF), Colors.transparent],
                 ),
               ),
             ),
@@ -1351,23 +1571,20 @@ class GlassCard extends StatelessWidget {
     return LiquidGlassSurface(
       borderRadius: 22,
       padding: padding,
-      native: false,
       child: Material(type: MaterialType.transparency, child: child),
     );
   }
 }
 
-/// Uses Apple's native UIGlassEffect on iOS 26 and a compatible blur fallback
-/// on earlier operating systems.
+/// A route-safe material surface rendered inside Flutter's scene.
 class LiquidGlassSurface extends StatelessWidget {
   const LiquidGlassSurface({
     super.key,
     required this.child,
     this.borderRadius = 18,
     this.padding = EdgeInsets.zero,
-    this.tint = const Color(0x99141725),
+    this.tint = const Color(0xD0101114),
     this.blur = 22,
-    this.native = true,
   });
 
   final Widget child;
@@ -1375,7 +1592,6 @@ class LiquidGlassSurface extends StatelessWidget {
   final EdgeInsetsGeometry padding;
   final Color tint;
   final double blur;
-  final bool native;
 
   @override
   Widget build(BuildContext context) {
@@ -1389,7 +1605,7 @@ class LiquidGlassSurface extends StatelessWidget {
             blurRadius: 30,
             offset: Offset(0, 14),
           ),
-          BoxShadow(color: Color(0x169B6CFF), blurRadius: 20, spreadRadius: -8),
+          BoxShadow(color: Color(0x14FFFFFF), blurRadius: 20, spreadRadius: -8),
         ],
       ),
       child: ClipRRect(
@@ -1397,12 +1613,7 @@ class LiquidGlassSurface extends StatelessWidget {
         child: Stack(
           children: [
             Positioned.fill(
-              child: _NativeGlassBackdrop(
-                borderRadius: borderRadius,
-                tint: tint,
-                blur: blur,
-                enabled: native,
-              ),
+              child: _GlassBackdrop(tint: tint, blur: blur),
             ),
             Container(
               padding: padding,
@@ -1448,37 +1659,17 @@ class LiquidGlassSurface extends StatelessWidget {
   }
 }
 
-class _NativeGlassBackdrop extends StatelessWidget {
-  const _NativeGlassBackdrop({
-    required this.borderRadius,
-    required this.tint,
-    required this.blur,
-    required this.enabled,
-  });
+class _GlassBackdrop extends StatelessWidget {
+  const _GlassBackdrop({required this.tint, required this.blur});
 
-  final double borderRadius;
   final Color tint;
   final double blur;
-  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
-    if (!Platform.isIOS || !enabled) {
-      return BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-        child: ColoredBox(color: tint),
-      );
-    }
-    return IgnorePointer(
-      child: UiKitView(
-        viewType: 'app.aniscale/native_liquid_glass',
-        creationParams: <String, Object>{
-          'cornerRadius': borderRadius,
-          'tint': tint.toARGB32(),
-          'interactive': true,
-        },
-        creationParamsCodec: const StandardMessageCodec(),
-      ),
+    return BackdropFilter(
+      filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+      child: ColoredBox(color: tint),
     );
   }
 }
@@ -1499,7 +1690,7 @@ class LiquidGlassIconButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return LiquidGlassSurface(
       borderRadius: 15,
-      tint: const Color(0xAA171A2A),
+      tint: const Color(0xE0121316),
       blur: 18,
       child: Tooltip(
         message: tooltip ?? '',
@@ -1536,7 +1727,11 @@ class BrandHeader extends StatelessWidget {
             gradient: aniGradient,
             borderRadius: BorderRadius.circular(10),
           ),
-          child: const Icon(Icons.auto_awesome_rounded, size: 18),
+          child: const Icon(
+            Icons.auto_awesome_rounded,
+            size: 18,
+            color: Colors.black,
+          ),
         ),
         const SizedBox(width: 10),
         const Text(
@@ -1639,7 +1834,7 @@ class GradientButton extends StatelessWidget {
             : aniGradient,
         borderRadius: BorderRadius.circular(18),
         boxShadow: const [
-          BoxShadow(color: Color(0x449B6CFF), blurRadius: 24, spreadRadius: -5),
+          BoxShadow(color: Color(0x24FFFFFF), blurRadius: 24, spreadRadius: -6),
         ],
       ),
       child: ElevatedButton.icon(
@@ -1649,7 +1844,7 @@ class GradientButton extends StatelessWidget {
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.transparent,
           shadowColor: Colors.transparent,
-          foregroundColor: Colors.white,
+          foregroundColor: Colors.black,
           minimumSize: const Size.fromHeight(54),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(18),
@@ -1677,7 +1872,7 @@ class SegmentedGlass extends StatelessWidget {
     return LiquidGlassSurface(
       borderRadius: 16,
       padding: const EdgeInsets.all(4),
-      tint: const Color(0xA5141725),
+      tint: const Color(0xE0101114),
       child: SizedBox(
         height: 36,
         child: Row(
@@ -1698,14 +1893,14 @@ class SegmentedGlass extends StatelessWidget {
                         : null,
                     boxShadow: active
                         ? const [
-                            BoxShadow(color: Color(0x449B6CFF), blurRadius: 12),
+                            BoxShadow(color: Color(0x24FFFFFF), blurRadius: 12),
                           ]
                         : null,
                   ),
                   child: Text(
                     labels[index],
                     style: TextStyle(
-                      color: active ? Colors.white : AniColors.mutedText,
+                      color: active ? Colors.black : AniColors.mutedText,
                       fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                       fontSize: 13,
                     ),
@@ -1767,13 +1962,14 @@ class FloatingNav extends StatelessWidget {
     const items = [
       (Icons.home_outlined, 'Home'),
       (Icons.history_rounded, 'History'),
+      (Icons.auto_awesome_outlined, 'Assistant'),
       (Icons.tune_rounded, 'Settings'),
     ];
     return SafeArea(
       minimum: const EdgeInsets.fromLTRB(18, 0, 18, 12),
       child: LiquidGlassSurface(
         borderRadius: 24,
-        tint: const Color(0xD0141725),
+        tint: const Color(0xF0101114),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
         child: SizedBox(
           height: 58,
@@ -1796,7 +1992,7 @@ class FloatingNav extends StatelessWidget {
                       boxShadow: active
                           ? const [
                               BoxShadow(
-                                color: Color(0x339B6CFF),
+                                color: Color(0x22FFFFFF),
                                 blurRadius: 14,
                               ),
                             ]
@@ -1807,14 +2003,14 @@ class FloatingNav extends StatelessWidget {
                       children: [
                         Icon(
                           items[index].$1,
-                          color: active ? Colors.white : AniColors.mutedText,
+                          color: active ? Colors.black : AniColors.mutedText,
                           size: 21,
                         ),
                         const SizedBox(height: 3),
                         Text(
                           items[index].$2,
                           style: TextStyle(
-                            color: active ? Colors.white : AniColors.mutedText,
+                            color: active ? Colors.black : AniColors.mutedText,
                             fontSize: 10,
                             fontWeight: active
                                 ? FontWeight.w700
