@@ -14,6 +14,12 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
-    upscaleEngine.register(with: engineBridge.pluginRegistry.registrar(forPlugin: "AniScaleUpscaleEngine")!.messenger())
+    let engineRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "AniScaleUpscaleEngine")!
+    upscaleEngine.register(with: engineRegistrar.messenger())
+    let glassRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "AniScaleNativeLiquidGlass")!
+    glassRegistrar.register(
+      NativeLiquidGlassFactory(messenger: glassRegistrar.messenger()),
+      withId: "app.aniscale/native_liquid_glass"
+    )
   }
 }

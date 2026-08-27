@@ -248,14 +248,18 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       .applying(videoTrack.preferredTransform)
     let sourceWidth = Int(abs(transformedRect.width).rounded())
     let sourceHeight = Int(abs(transformedRect.height).rounded())
-    let outputWidth = max(2, ((sourceWidth * scale) / 2) * 2)
-    let outputHeight = max(2, ((sourceHeight * scale) / 2) * 2)
-    guard outputWidth * outputHeight <= 8_847_360 else {
-      throw EngineError(
-        "video_too_large",
-        "That scale would exceed 4K per frame. Choose 2× or use a smaller video."
-      )
-    }
+    let requestedWidth = sourceWidth * scale
+    let requestedHeight = sourceHeight * scale
+    // iPhone hardware encoders generally top out around 4K. Keep 4× as a
+    // usable enhancement mode by automatically fitting oversized results into
+    // the largest safe 4K canvas instead of rejecting the video outright.
+    let longestEdgeLimit = 3_840.0
+    let pixelLimit = 8_847_360.0
+    let edgeRatio = longestEdgeLimit / Double(max(requestedWidth, requestedHeight))
+    let pixelRatio = sqrt(pixelLimit / Double(requestedWidth * requestedHeight))
+    let outputRatio = min(1, edgeRatio, pixelRatio)
+    let outputWidth = max(2, (Int(Double(requestedWidth) * outputRatio) / 2) * 2)
+    let outputHeight = max(2, (Int(Double(requestedHeight) * outputRatio) / 2) * 2)
     let durationSeconds = max(CMTimeGetSeconds(asset.duration), 0.01)
 
     let reader = try AVAssetReader(asset: asset)
@@ -339,7 +343,10 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         )
         frame = frame.applyingFilter(
           "CILanczosScaleTransform",
-          parameters: [kCIInputScaleKey: CGFloat(scale), kCIInputAspectRatioKey: 1.0]
+          parameters: [
+            kCIInputScaleKey: CGFloat(outputWidth) / CGFloat(sourceWidth),
+            kCIInputAspectRatioKey: 1.0
+          ]
         )
         ciContext.render(
           frame,
@@ -446,6 +453,10 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       space: CGColorSpaceCreateDeviceRGB(),
       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
     ) else { return nil }
+    // UIKit images use a top-left origin while a raw bitmap CGContext uses a
+    // bottom-left origin. Flip the context once so the AI input is upright.
+    context.translateBy(x: 0, y: CGFloat(height))
+    context.scaleBy(x: 1, y: -1)
     UIGraphicsPushContext(context)
     image.draw(in: CGRect(x: 0, y: 0, width: width, height: height))
     UIGraphicsPopContext()

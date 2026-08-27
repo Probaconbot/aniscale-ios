@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 
 abstract final class AniColors {
-  static const background = Color(0xFF070A12);
-  static const deepNavy = Color(0xFF0B1020);
+  static const background = Color(0xFF05070C);
+  static const deepNavy = Color(0xFF0A0D16);
   static const glass = Color(0xB8141725);
   static const elevatedGlass = Color(0xC71E2237);
-  static const purple = Color(0xFF9B6CFF);
-  static const blue = Color(0xFF45C7FF);
-  static const lavender = Color(0xFFC4B5FD);
-  static const secondaryText = Color(0xFFA7ADBF);
-  static const mutedText = Color(0xFF6F7890);
+  static const purple = Color(0xFF8B7CFF);
+  static const blue = Color(0xFF50D4FF);
+  static const lavender = Color(0xFFD2CCFF);
+  static const secondaryText = Color(0xFFB8BECC);
+  static const mutedText = Color(0xFF7A8295);
   static const success = Color(0xFF42E6A4);
   static const error = Color(0xFFFF6B81);
   static const border = Color(0x1FFFFFFF);
@@ -83,7 +83,7 @@ abstract final class AppTheme {
 }
 
 const aniGradient = LinearGradient(
-  colors: [AniColors.purple, AniColors.blue],
+  colors: [Color(0xFF806CFF), Color(0xFF4AA9FF), Color(0xFF50D4FF)],
   begin: Alignment.topLeft,
   end: Alignment.bottomRight,
 );

@@ -281,7 +281,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                   leading: Icon(Icons.bolt_rounded, color: AniColors.blue),
                   title: Text('Local GPU video enhancement'),
                   subtitle: Text(
-                    'Every frame is resized on this iPhone and the original audio is preserved. 4× is limited to videos that stay within 4K output.',
+                    'Every frame is enhanced on this iPhone and the original audio is preserved. Oversized 4× results automatically fit the largest safe 4K output.',
                   ),
                 ),
               ),
@@ -1306,25 +1306,25 @@ class AmbientBackground extends StatelessWidget {
       decoration: const BoxDecoration(
         color: AniColors.background,
         gradient: RadialGradient(
-          center: Alignment(-.8, -.85),
-          radius: 1.25,
-          colors: [Color(0x332B185D), AniColors.background],
-          stops: [0, .75],
+          center: Alignment(-.7, -1),
+          radius: 1.35,
+          colors: [Color(0x3D292060), Color(0xFF090C16), AniColors.background],
+          stops: [0, .46, 1],
         ),
       ),
       child: Stack(
         fit: StackFit.expand,
         children: [
           Positioned(
-            right: -120,
-            bottom: 40,
+            right: -100,
+            bottom: 20,
             child: Container(
-              width: 280,
-              height: 280,
+              width: 320,
+              height: 320,
               decoration: const BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: RadialGradient(
-                  colors: [Color(0x2238BDF8), Colors.transparent],
+                  colors: [Color(0x2945C7FF), Colors.transparent],
                 ),
               ),
             ),
@@ -1351,15 +1351,14 @@ class GlassCard extends StatelessWidget {
     return LiquidGlassSurface(
       borderRadius: 22,
       padding: padding,
+      native: false,
       child: Material(type: MaterialType.transparency, child: child),
     );
   }
 }
 
-/// A stable Flutter-rendered version of Apple's Liquid Glass look.
-///
-/// It keeps the app compatible with current Flutter iOS builds while using
-/// real backdrop blur, edge refraction highlights and a soft internal tint.
+/// Uses Apple's native UIGlassEffect on iOS 26 and a compatible blur fallback
+/// on earlier operating systems.
 class LiquidGlassSurface extends StatelessWidget {
   const LiquidGlassSurface({
     super.key,
@@ -1368,6 +1367,7 @@ class LiquidGlassSurface extends StatelessWidget {
     this.padding = EdgeInsets.zero,
     this.tint = const Color(0x99141725),
     this.blur = 22,
+    this.native = true,
   });
 
   final Widget child;
@@ -1375,6 +1375,7 @@ class LiquidGlassSurface extends StatelessWidget {
   final EdgeInsetsGeometry padding;
   final Color tint;
   final double blur;
+  final bool native;
 
   @override
   Widget build(BuildContext context) {
@@ -1393,51 +1394,90 @@ class LiquidGlassSurface extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: radius,
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-          child: Container(
-            padding: padding,
-            decoration: BoxDecoration(
-              borderRadius: radius,
-              border: Border.all(color: const Color(0x36FFFFFF)),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Color.alphaBlend(const Color(0x1FFFFFFF), tint),
-                  Color.alphaBlend(const Color(0x0AFFFFFF), tint),
-                  Color.alphaBlend(const Color(0x1418A9E8), tint),
-                ],
-                stops: const [0, .5, 1],
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: _NativeGlassBackdrop(
+                borderRadius: borderRadius,
+                tint: tint,
+                blur: blur,
+                enabled: native,
               ),
             ),
-            child: Stack(
-              children: [
-                Positioned(
-                  left: 10,
-                  right: 10,
-                  top: 0,
-                  child: IgnorePointer(
-                    child: Container(
-                      height: 1,
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [
-                            Colors.transparent,
-                            Color(0xA8FFFFFF),
-                            Colors.transparent,
-                          ],
+            Container(
+              padding: padding,
+              decoration: BoxDecoration(
+                borderRadius: radius,
+                border: Border.all(color: const Color(0x3DFFFFFF)),
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0x1CFFFFFF), Color(0x05000000)],
+                ),
+              ),
+              child: Stack(
+                children: [
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    top: 0,
+                    child: IgnorePointer(
+                      child: Container(
+                        height: 1,
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [
+                              Colors.transparent,
+                              Color(0xC2FFFFFF),
+                              Colors.transparent,
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(1),
                         ),
-                        borderRadius: BorderRadius.circular(1),
                       ),
                     ),
                   ),
-                ),
-                child,
-              ],
+                  child,
+                ],
+              ),
             ),
-          ),
+          ],
         ),
+      ),
+    );
+  }
+}
+
+class _NativeGlassBackdrop extends StatelessWidget {
+  const _NativeGlassBackdrop({
+    required this.borderRadius,
+    required this.tint,
+    required this.blur,
+    required this.enabled,
+  });
+
+  final double borderRadius;
+  final Color tint;
+  final double blur;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!Platform.isIOS || !enabled) {
+      return BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+        child: ColoredBox(color: tint),
+      );
+    }
+    return IgnorePointer(
+      child: UiKitView(
+        viewType: 'app.aniscale/native_liquid_glass',
+        creationParams: <String, Object>{
+          'cornerRadius': borderRadius,
+          'tint': tint.toARGB32(),
+          'interactive': true,
+        },
+        creationParamsCodec: const StandardMessageCodec(),
       ),
     );
   }
@@ -1805,10 +1845,23 @@ class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context) {
+    final canGoBack = Navigator.of(context).canPop();
     return AppBar(
-      backgroundColor: AniColors.background.withValues(alpha: .78),
+      backgroundColor: AniColors.background.withValues(alpha: .72),
       surfaceTintColor: Colors.transparent,
       centerTitle: true,
+      automaticallyImplyLeading: false,
+      leadingWidth: canGoBack ? 60 : null,
+      leading: canGoBack
+          ? Padding(
+              padding: const EdgeInsets.only(left: 10, top: 6, bottom: 6),
+              child: LiquidGlassIconButton(
+                icon: Icons.arrow_back_ios_new_rounded,
+                tooltip: 'Back',
+                onPressed: () => Navigator.of(context).maybePop(),
+              ),
+            )
+          : null,
       title: Text(
         title,
         style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
