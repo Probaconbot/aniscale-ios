@@ -10,7 +10,7 @@ on:
       version:
         description: Release version without the v prefix
         required: true
-        default: 1.10.0
+        default: 1.11.0
         type: string
 
 permissions:
@@ -58,9 +58,23 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           cat > release-notes.md <<EOF
-          ## AniScale ${VERSION} — mobile fixes and AniUltraScale foundation
+          ## AniScale ${VERSION} — AniScale Clean and monochrome command interface
 
-          This release fixes Android model-memory failures, reduces processing overhead, sharpens the existing video pipeline, and makes image and video history persistent and reopenable. It also publishes the reproducible AniUltraScale temporal-video training foundation for developers.
+          This release adds a separate restoration-first video path for damaged footage and rebuilds AniScale around a premium black-and-white command interface shared by Android and iOS.
+
+          ### AniScale Clean
+
+          - New video engine choice for footage with green casts, scanlines, moiré-like patterning, chroma noise, blur, and compression damage.
+          - Runs cleanup before the stable AniScale Fusion upscale path.
+          - Uses Core Image acceleration on iPhone and a bounded native Android cleanup pass to avoid a desktop CUDA dependency.
+          - Applies restrained color correction, pattern suppression, noise cleanup, local contrast, and edge recovery without aggressive face smoothing.
+          - Preserves original audio and the existing encoder-safe output behavior.
+
+          ### Premium monochrome interface
+
+          - New black-and-white command bar matching the supplied visual direction.
+          - Functional Video, Image, Upscale, Ask AI, attachment, send, model, controls, and navigation actions.
+          - White selected states, dark elevated pills, tighter spacing, and restrained motion replace the previous purple-blue treatment.
 
           ### AniUltraScale developer foundation
 
@@ -69,7 +83,7 @@ jobs:
           - Crisp-detail objectives using edge, frequency, local-contrast, and multi-scale Laplacian losses rather than targeting the softer Real-ESRGAN appearance.
           - Temporal supervision to reduce flicker and keep recovered detail stable between frames.
           - Licence-audited training-media acquisition, real-video degradation, guarded export, and validation tooling.
-          - **Status:** training source is included, but AniUltraScale is not exposed as a production app engine until trained weights and physical-device benchmarks pass the documented release gate.
+          - **Status:** AniUltraScale remains explicitly Experimental with deterministic untrained weights; it is not a production checkpoint.
 
           ### AniUltraScale Experimental
 
@@ -94,7 +108,7 @@ jobs:
 
           ### Interface and history
 
-          - Shared premium purple-blue glass styling and edge-to-edge layout on Android and iOS.
+          - Shared premium monochrome glass styling and edge-to-edge layout on Android and iOS.
           - Image and video history persists across launches.
           - History entries can be filtered, reopened, played, shared, saved, or deleted.
           - Settings, About, model information, licences, and clear-history controls are functional.

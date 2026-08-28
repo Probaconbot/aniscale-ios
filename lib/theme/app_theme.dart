@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 
 abstract final class AniColors {
-  static const background = Color(0xFF070A12);
-  static const deepNavy = Color(0xFF0B1020);
-  static const glass = Color(0xD9141725);
-  static const elevatedGlass = Color(0xE61E2237);
-  static const purple = Color(0xFF9B6CFF);
-  static const blue = Color(0xFF45C7FF);
-  static const lavender = Color(0xFFC4B5FD);
-  static const secondaryText = Color(0xFFA7ADBF);
-  static const mutedText = Color(0xFF6F7890);
-  static const success = Color(0xFF42E6A4);
+  static const background = Color(0xFF030303);
+  static const deepNavy = Color(0xFF0B0B0C);
+  static const glass = Color(0xE6111214);
+  static const elevatedGlass = Color(0xF0191A1D);
+  static const purple = Color(0xFFF5F5F7);
+  static const blue = Color(0xFFD7D8DC);
+  static const lavender = Color(0xFFF0F0F2);
+  static const secondaryText = Color(0xFFB7B8BD);
+  static const mutedText = Color(0xFF7B7D84);
+  static const success = Color(0xFFF5F5F7);
   static const error = Color(0xFFFF6B81);
   static const border = Color(0x1FFFFFFF);
 }
@@ -18,7 +18,7 @@ abstract final class AniColors {
 abstract final class AppTheme {
   static ThemeData get dark {
     const scheme = ColorScheme.dark(
-      primary: AniColors.purple,
+      primary: Colors.white,
       secondary: AniColors.blue,
       surface: AniColors.deepNavy,
       error: AniColors.error,
@@ -83,10 +83,10 @@ abstract final class AppTheme {
         ),
       ),
       sliderTheme: const SliderThemeData(
-        activeTrackColor: AniColors.purple,
-        inactiveTrackColor: Color(0xFF282D42),
+        activeTrackColor: Colors.white,
+        inactiveTrackColor: Color(0xFF2A2B2E),
         thumbColor: Colors.white,
-        overlayColor: Color(0x339B6CFF),
+        overlayColor: Color(0x33FFFFFF),
       ),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: AniColors.elevatedGlass,
@@ -99,7 +99,7 @@ abstract final class AppTheme {
 }
 
 const aniGradient = LinearGradient(
-  colors: [AniColors.purple, Color(0xFF6C8CFF), AniColors.blue],
+  colors: [Color(0xFFFFFFFF), Color(0xFFE5E5E8), Color(0xFFBFC1C7)],
   begin: Alignment.topLeft,
   end: Alignment.bottomRight,
 );

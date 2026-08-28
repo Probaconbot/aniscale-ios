@@ -204,7 +204,7 @@ class MainActivity : FlutterActivity() {
         val tileSize = call.argument<Int>("tileSize") ?: 192
         val engine = call.argument<String>("engine") ?: "fusion"
         if (path.isNullOrBlank() || scale !in listOf(2, 4) ||
-            engine !in listOf("fusion", "render", "turbo", "ultra")) {
+            engine !in listOf("fusion", "render", "turbo", "clean", "ultra")) {
             result.error("bad_arguments", "Invalid video request.", null)
             return
         }
@@ -319,8 +319,10 @@ class MainActivity : FlutterActivity() {
                         decoded.recycle()
                     }
                 }
-                val rgba = fitted.copy(Bitmap.Config.ARGB_8888, false)
-                fitted.recycle()
+                val prepared = if (engine == "clean") cleanupFrame(fitted) else fitted
+                if (prepared !== fitted) fitted.recycle()
+                val rgba = prepared.copy(Bitmap.Config.ARGB_8888, false)
+                prepared.recycle()
                 val modelSharpness = when (engine) {
                     "render" -> 0.18f
                     "turbo" -> 0.22f
@@ -331,7 +333,7 @@ class MainActivity : FlutterActivity() {
                 } else {
                     nativeUpscale(
                         rgba,
-                        engine,
+                        if (engine == "clean") "fusion" else engine,
                         scale,
                         tileSize,
                         modelSharpness,
@@ -400,8 +402,42 @@ class MainActivity : FlutterActivity() {
     private fun engineLabel(engine: String): String = when (engine) {
         "render" -> "AniScale Render"
         "turbo" -> "AniScale Turbo"
+        "clean" -> "AniScale Clean"
         "ultra" -> "AniUltraScale Experimental"
         else -> "AniScale Fusion"
+    }
+
+    /**
+     * Mobile-safe cleanup pass for patterned/green-cast footage. It blends a
+     * vertical three-tap filter to suppress scanlines, neutralizes excessive
+     * green, and applies restrained local contrast before Fusion upscaling.
+     */
+    private fun cleanupFrame(bitmap: Bitmap): Bitmap {
+        val width = bitmap.width
+        val height = bitmap.height
+        val source = IntArray(width * height)
+        val output = IntArray(source.size)
+        bitmap.getPixels(source, 0, width, 0, 0, width, height)
+        for (y in 0 until height) {
+            val above = max(0, y - 1)
+            val below = min(height - 1, y + 1)
+            for (x in 0 until width) {
+                val index = y * width + x
+                val p = source[index]
+                val pa = source[above * width + x]
+                val pb = source[below * width + x]
+                var r = (((p shr 16) and 255) * 6 + ((pa shr 16) and 255) + ((pb shr 16) and 255)) / 8
+                var g = (((p shr 8) and 255) * 6 + ((pa shr 8) and 255) + ((pb shr 8) and 255)) / 8
+                var b = ((p and 255) * 6 + (pa and 255) + (pb and 255)) / 8
+                val neutral = (r + b) / 2
+                if (g > neutral) g = (neutral + (g - neutral) * 0.45f).roundToInt()
+                r = ((r - 128) * 1.06f + 130).roundToInt().coerceIn(0, 255)
+                g = ((g - 128) * 1.04f + 128).roundToInt().coerceIn(0, 255)
+                b = ((b - 128) * 1.06f + 130).roundToInt().coerceIn(0, 255)
+                output[index] = (p and -0x1000000) or (r shl 16) or (g shl 8) or b
+            }
+        }
+        return Bitmap.createBitmap(output, width, height, Bitmap.Config.ARGB_8888)
     }
 
     private fun upscaleUltraExperimental(bitmap: Bitmap): Bitmap {

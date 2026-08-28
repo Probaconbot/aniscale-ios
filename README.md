@@ -4,12 +4,13 @@ AniScale is a private, offline-first image and video enhancer for iPhone and And
 
 ## Current build
 
-- Shared premium purple-blue glass interface, responsive navigation, spacing, and controls on iOS and Android
+- Shared premium black-and-white command-bar interface, responsive pill navigation, spacing, and controls on iOS and Android
 - Custom AniScale launcher icon and in-app logo on iOS and Android
 - Image picker for PNG, JPG, and WebP
 - Local 2× and 4× AniScale Fusion image upscaling through Core ML with automatic
   memory-safe fitting for large camera images
-- Local 2× and 4× video enhancement with AniScale Fusion for anime/stylized 3D, the separate heavy
+- Local 2× and 4× video enhancement with AniScale Fusion for anime/stylized 3D, AniScale Clean for
+  patterned/color-damaged footage, the separate heavy
   AniScale Render model for general 3D, and compact AniScale Turbo for lower heat, with progress,
   cancellation, original audio, automatic encoder-safe 4K fitting, and Efficient and Maximum modes
 - Processing, before/after comparison, persistent image/video history, reopen, delete, playback, settings, save, and share flows
@@ -35,6 +36,14 @@ muxed into the local result. Android keeps only the selected model resident, use
 supported, performs frame-to-YUV conversion in native code, and chooses engine-specific working
 resolutions while preserving an encoder-safe full export size. Fusion, Render, and Turbo are also
 selectable for Android image upscaling.
+
+AniScale Clean is a separate video restoration pipeline for green casts, scanlines, moiré-like
+patterning, chroma noise, blur, and compression damage. It runs a bounded native cleanup pass before
+Fusion, using Core Image on iOS and an optimized bitmap pass on Android. The desktop
+[VideoDemoireing](https://github.com/CVMI-Lab/VideoDemoireing) and
+[BasicVSR++](https://github.com/ckkelvinchan/BasicVSR_PlusPlus) implementations are documented as
+future training teachers; their CUDA/MMCV/custom-operator checkpoints are not falsely presented as
+mobile models.
 
 ## Video model training
 

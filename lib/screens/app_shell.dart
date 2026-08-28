@@ -80,6 +80,7 @@ class _AppShellState extends State<AppShell> {
         history: _history,
         onOpenSettings: () => setState(() => _tab = 3),
         onOpenHistory: () => setState(() => _tab = 1),
+        onOpenAssistant: () => setState(() => _tab = 2),
         onEnhanced: _addEnhancement,
         settings: _settings,
       ),
@@ -118,6 +119,7 @@ class HomeScreen extends StatefulWidget {
     required this.history,
     required this.onOpenSettings,
     required this.onOpenHistory,
+    required this.onOpenAssistant,
     required this.onEnhanced,
     required this.settings,
   });
@@ -125,6 +127,7 @@ class HomeScreen extends StatefulWidget {
   final List<Enhancement> history;
   final VoidCallback onOpenSettings;
   final VoidCallback onOpenHistory;
+  final VoidCallback onOpenAssistant;
   final ValueChanged<Enhancement> onEnhanced;
   final AppSettings settings;
 
@@ -192,31 +195,28 @@ class _HomeScreenState extends State<HomeScreen> {
           sliver: SliverList.list(
             children: [
               BrandHeader(onSettings: widget.onOpenSettings),
-              const SizedBox(height: 34),
+              const SizedBox(height: 30),
               Text(
-                'Enhance every detail.',
+                'Create a cleaner frame.',
                 style: Theme.of(context).textTheme.displaySmall,
               ),
               const SizedBox(height: 12),
               const Text(
-                'Upscale anime art, illustrations, and video frames privately on your device.',
+                'Choose media, select a restoration model, and let AniScale recover the detail.',
                 style: TextStyle(
                   color: AniColors.secondaryText,
                   fontSize: 15,
                   height: 1.45,
                 ),
               ),
-              const SizedBox(height: 24),
-              SegmentedGlass(
-                labels: const ['Image', 'Video'],
-                selected: _videoMode ? 1 : 0,
-                onSelected: (index) => setState(() => _videoMode = index == 1),
-              ),
-              const SizedBox(height: 18),
-              UploadCard(
+              const SizedBox(height: 26),
+              CommandDeck(
                 videoMode: _videoMode,
                 loading: _picking,
-                onPressed: _pickMedia,
+                onModeChanged: (video) => setState(() => _videoMode = video),
+                onPick: _pickMedia,
+                onAssistant: widget.onOpenAssistant,
+                onSettings: widget.onOpenSettings,
               ),
               const SizedBox(height: 18),
               const Row(
@@ -282,7 +282,7 @@ class VideoSelectedScreen extends StatefulWidget {
   State<VideoSelectedScreen> createState() => _VideoSelectedScreenState();
 }
 
-enum _VideoEngine { fusion, render, turbo, ultra }
+enum _VideoEngine { fusion, render, turbo, clean, ultra }
 
 class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
   int _scale = 2;
@@ -365,7 +365,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
               const ControlLabel('VIDEO ENGINE'),
               const SizedBox(height: 9),
               SegmentedGlass(
-                labels: const ['Fusion', 'Render', 'Turbo', 'Ultra'],
+                labels: const ['Fusion', 'Render', 'Turbo', 'Clean', 'Ultra'],
                 selected: _engine.index,
                 onSelected: (index) =>
                     setState(() => _engine = _VideoEngine.values[index]),
@@ -376,6 +376,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                   _VideoEngine.fusion => 'AniScale Fusion — tuned for anime and stylized 3D with strong, faithful detail.',
                   _VideoEngine.render => 'AniScale Render — a heavier 23-block model for clean 3D surfaces, sharper geometry, and restrained noise.',
                   _VideoEngine.turbo => 'AniScale Turbo — a compact video model for faster processing and lower heat.',
+                  _VideoEngine.clean => 'AniScale Clean — corrects green cast, scanlines, moiré, chroma noise, blur, and compression before Fusion upscaling.',
                   _VideoEngine.ultra => 'AniUltraScale Experimental — the real temporal VSR architecture with untrained weights. Noisy or corrupted output is expected.',
                 },
                 textAlign: TextAlign.center,
@@ -424,10 +425,11 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                     _VideoEngine.fusion => 'AniScale Fusion — Anime & 3D',
                     _VideoEngine.render => 'AniScale Render — 3D',
                     _VideoEngine.turbo => 'AniScale Turbo — Fast',
+                    _VideoEngine.clean => 'AniScale Clean — Restore',
                     _VideoEngine.ultra => 'AniUltraScale — Experimental',
                   }),
                   subtitle: Text(
-                    '${_engine == _VideoEngine.ultra ? (Platform.isIOS ? 'Core ML experimental VSR' : 'ONNX Runtime experimental VSR') : (Platform.isIOS ? 'Core ML' : 'ncnn Vulkan')} processes locally. Original audio is preserved and oversized results fit a safe 4K output.',
+                    '${_engine == _VideoEngine.ultra ? (Platform.isIOS ? 'Core ML experimental VSR' : 'ONNX Runtime experimental VSR') : (Platform.isIOS ? 'Core Image + Core ML' : 'Android cleanup + ncnn Vulkan')} processes locally. Original audio is preserved and oversized results fit a safe 4K output.',
                   ),
                 ),
               ),
@@ -1029,8 +1031,8 @@ class _EditorScreenState extends State<EditorScreen> {
                   _VideoEngine.render => 'Photos, CGI, and rendered textures with restrained cleanup.',
                   _VideoEngine.turbo =>
                     'Compact 2×/4× model for the fastest, coolest result.',
-                  _VideoEngine.ultra =>
-                    'Video-only experimental engine; choose another engine for images.',
+                  _VideoEngine.clean => 'Video-only patterned-footage cleanup; choose another engine for images.',
+                  _VideoEngine.ultra => 'Video-only experimental engine; choose another engine for images.',
                 },
                 textAlign: TextAlign.center,
                 style: const TextStyle(
@@ -2358,7 +2360,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           SizedBox(height: 8),
                           Text('Turbo — compact native 2×/4× processing.'),
                           SizedBox(height: 8),
-                          Text('AniUltraScale — untrained temporal VSR experiment; noisy output expected.'),
+                          Text(
+                            'Clean — pattern, color-cast, noise, blur, and compression restoration before Fusion.',
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            'AniUltraScale — untrained temporal VSR experiment; noisy output expected.',
+                          ),
                         ],
                       ),
                     ),
@@ -2397,7 +2405,7 @@ class AmbientBackground extends StatelessWidget {
         gradient: RadialGradient(
           center: Alignment(-.7, -1),
           radius: 1.35,
-          colors: [Color(0x409B6CFF), Color(0xFF0B1020), AniColors.background],
+          colors: [Color(0x24FFFFFF), Color(0xFF101012), AniColors.background],
           stops: [0, .46, 1],
         ),
       ),
@@ -2616,6 +2624,165 @@ class BrandHeader extends StatelessWidget {
   }
 }
 
+class CommandDeck extends StatelessWidget {
+  const CommandDeck({
+    super.key,
+    required this.videoMode,
+    required this.loading,
+    required this.onModeChanged,
+    required this.onPick,
+    required this.onAssistant,
+    required this.onSettings,
+  });
+
+  final bool videoMode;
+  final bool loading;
+  final ValueChanged<bool> onModeChanged;
+  final VoidCallback onPick;
+  final VoidCallback onAssistant;
+  final VoidCallback onSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget action(
+      IconData icon,
+      String label,
+      VoidCallback onTap, {
+      bool active = false,
+    }) {
+      return Material(
+        color: active ? Colors.white : const Color(0xFF111215),
+        borderRadius: BorderRadius.circular(24),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(24),
+          child: Container(
+            height: 48,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: const Color(0x32FFFFFF)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: 20,
+                  color: active ? Colors.black : Colors.white,
+                ),
+                const SizedBox(width: 9),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: active ? Colors.black : Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        LiquidGlassSurface(
+          borderRadius: 34,
+          padding: const EdgeInsets.all(7),
+          tint: const Color(0xF00D0E10),
+          child: Row(
+            children: [
+              IconButton.filledTonal(
+                onPressed: loading ? null : onPick,
+                icon: const Icon(Icons.add_rounded),
+                style: IconButton.styleFrom(
+                  backgroundColor: const Color(0xFF1C1D21),
+                  foregroundColor: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 6),
+              const Expanded(
+                child: Text(
+                  '@Search, enhance, upscale, or ask AI…',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AniColors.secondaryText,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: loading ? null : onPick,
+                icon: const Icon(Icons.attach_file_rounded, size: 21),
+                color: AniColors.secondaryText,
+              ),
+              IconButton(
+                onPressed: onAssistant,
+                icon: const Icon(Icons.graphic_eq_rounded, size: 21),
+                color: AniColors.secondaryText,
+              ),
+              IconButton.filled(
+                onPressed: loading ? null : onPick,
+                icon: loading
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.arrow_upward_rounded),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        Wrap(
+          spacing: 9,
+          runSpacing: 9,
+          alignment: WrapAlignment.center,
+          children: [
+            action(
+              Icons.video_call_outlined,
+              'Video',
+              () => onModeChanged(true),
+              active: videoMode,
+            ),
+            action(
+              Icons.image_outlined,
+              'Image',
+              () => onModeChanged(false),
+              active: !videoMode,
+            ),
+            action(Icons.auto_awesome_rounded, 'Upscale', onPick),
+            action(Icons.chat_bubble_outline_rounded, 'Ask AI', onAssistant),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: action(
+                videoMode ? Icons.movie_filter_outlined : Icons.photo_outlined,
+                loading
+                    ? 'Opening…'
+                    : 'Choose ${videoMode ? 'video' : 'image'}',
+                onPick,
+              ),
+            ),
+            const SizedBox(width: 9),
+            action(Icons.tune_rounded, 'Controls', onSettings),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 class UploadCard extends StatelessWidget {
   const UploadCard({
     super.key,
@@ -2711,7 +2878,7 @@ class GradientButton extends StatelessWidget {
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.transparent,
           shadowColor: Colors.transparent,
-          foregroundColor: Colors.white,
+          foregroundColor: Colors.black,
           minimumSize: const Size.fromHeight(54),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(18),
@@ -2757,7 +2924,7 @@ class SegmentedGlass extends StatelessWidget {
                   curve: Curves.easeOutCubic,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    gradient: active ? aniGradient : null,
+                    color: active ? Colors.white : null,
                     borderRadius: BorderRadius.circular(12),
                     border: active
                         ? Border.all(color: const Color(0x55FFFFFF))
@@ -2771,7 +2938,7 @@ class SegmentedGlass extends StatelessWidget {
                   child: Text(
                     labels[index],
                     style: TextStyle(
-                      color: active ? Colors.white : AniColors.mutedText,
+                      color: active ? Colors.black : AniColors.mutedText,
                       fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                       fontSize: 13,
                     ),
@@ -2859,7 +3026,7 @@ class FloatingNav extends StatelessWidget {
                     ),
                     curve: Curves.easeOutCubic,
                     decoration: BoxDecoration(
-                      gradient: active ? aniGradient : null,
+                      color: active ? Colors.white : null,
                       borderRadius: BorderRadius.circular(17),
                       border: active
                           ? Border.all(color: const Color(0x55FFFFFF))
@@ -2878,14 +3045,14 @@ class FloatingNav extends StatelessWidget {
                       children: [
                         Icon(
                           items[index].$1,
-                          color: active ? Colors.white : AniColors.mutedText,
+                          color: active ? Colors.black : AniColors.mutedText,
                           size: 21,
                         ),
                         const SizedBox(height: 3),
                         Text(
                           items[index].$2,
                           style: TextStyle(
-                            color: active ? Colors.white : AniColors.mutedText,
+                            color: active ? Colors.black : AniColors.mutedText,
                             fontSize: 10,
                             fontWeight: active
                                 ? FontWeight.w700

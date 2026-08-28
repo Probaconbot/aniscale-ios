@@ -104,7 +104,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         }
         let efficient = arguments["efficient"] as? Bool ?? true
         let engine = arguments["engine"] as? String ?? "fusion"
-        guard engine == "fusion" || engine == "render" || engine == "turbo" || engine == "ultra" else {
+        guard engine == "fusion" || engine == "render" || engine == "turbo" || engine == "clean" || engine == "ultra" else {
           result(FlutterError(code: "bad_arguments", message: "Unknown video engine.", details: nil))
           return
         }
@@ -406,10 +406,10 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     let selectedModel = engine == "render" ? renderModel : (engine == "turbo" ? turboModel : fusionModel)
     let engineLabel = engine == "render"
       ? "AniScale Render"
-      : (engine == "turbo" ? "AniScale Turbo" : (engine == "ultra" ? "AniUltraScale Experimental" : "AniScale Fusion"))
-    let videoDenoise = engine == "render" ? 0.34 : (engine == "turbo" ? 0.16 : 0.2)
-    let videoSharpness = engine == "render" ? 0.34 : (engine == "turbo" ? 0.2 : 0.26)
-    let videoDetail = engine == "render" ? 0.68 : (engine == "turbo" ? 0.48 : 0.6)
+      : (engine == "turbo" ? "AniScale Turbo" : (engine == "clean" ? "AniScale Clean" : (engine == "ultra" ? "AniUltraScale Experimental" : "AniScale Fusion")))
+    let videoDenoise = engine == "render" ? 0.34 : (engine == "clean" ? 0.30 : (engine == "turbo" ? 0.16 : 0.2))
+    let videoSharpness = engine == "render" ? 0.34 : (engine == "clean" ? 0.24 : (engine == "turbo" ? 0.2 : 0.26))
+    let videoDetail = engine == "render" ? 0.68 : (engine == "clean" ? 0.56 : (engine == "turbo" ? 0.48 : 0.6))
     let sourceURL = URL(fileURLWithPath: path)
     let asset = AVAsset(url: sourceURL)
     guard let videoTrack = asset.tracks(withMediaType: .video).first else {
@@ -531,6 +531,9 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
             )
           }
         }
+        if engine == "clean" {
+          frame = cleanupFrame(frame).cropped(to: frame.extent)
+        }
         guard let frameImage = ciContext.createCGImage(frame, from: frame.extent) else {
           throw EngineError(
             "video_frame_decode",
@@ -641,6 +644,39 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         ? "\(engineLabel) (Efficient Core ML)"
         : "\(engineLabel) (Maximum Core ML)"
     ]
+  }
+
+  /// Lightweight mobile restoration used before Fusion. The desktop
+  /// VideoDemoireing/BasicVSR++ projects are training teachers; this path uses
+  /// Core Image so it remains deployable and hardware accelerated on iPhone.
+  private func cleanupFrame(_ image: CIImage) -> CIImage {
+    let extent = image.extent
+    let balanced = image.applyingFilter(
+      "CIColorMatrix",
+      parameters: [
+        "inputRVector": CIVector(x: 1.06, y: 0, z: 0, w: 0),
+        "inputGVector": CIVector(x: 0, y: 0.91, z: 0, w: 0),
+        "inputBVector": CIVector(x: 0, y: 0, z: 1.04, w: 0),
+        "inputBiasVector": CIVector(x: 0.005, y: 0, z: 0.005, w: 0)
+      ]
+    )
+    let cleaned = balanced.applyingFilter(
+      "CINoiseReduction",
+      parameters: ["inputNoiseLevel": 0.035, "inputSharpness": 0.32]
+    )
+    // A sub-pixel vertical blur suppresses fine horizontal scanline energy;
+    // controlled luminance sharpening restores edges without strong halos.
+    return cleaned
+      .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 0.55])
+      .cropped(to: extent)
+      .applyingFilter(
+        "CISharpenLuminance",
+        parameters: [kCIInputSharpnessKey: 0.34, "inputRadius": 1.1]
+      )
+      .applyingFilter(
+        "CIColorControls",
+        parameters: [kCIInputContrastKey: 1.07, kCIInputSaturationKey: 0.94]
+      )
   }
 
   private func upscaleUltraExperimental(_ image: UIImage) throws -> CGImage {
