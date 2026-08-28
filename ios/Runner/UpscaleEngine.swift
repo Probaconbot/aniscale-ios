@@ -557,9 +557,12 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           tileInferenceMilliseconds.append(contentsOf: frameInference)
         }
         processedFrames += 1
-        guard let enhancedImage = enhanced["cgImage"] as? CGImage else {
+        guard let enhancedValue = enhanced["cgImage"] else {
           throw EngineError("video_frame_encode", "The AI engine returned no enhanced frame.")
         }
+        // Core Foundation objects cannot be conditionally downcast reliably in
+        // Swift 6. This value is created by the internal upscale path above.
+        let enhancedImage = enhancedValue as! CGImage
         var enhancedFrame = CIImage(cgImage: enhancedImage)
         let fitScale = min(
           CGFloat(outputWidth) / enhancedFrame.extent.width,
