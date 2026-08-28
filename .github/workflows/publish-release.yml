@@ -112,20 +112,14 @@ jobs:
         run: |
           TAG="v${VERSION}"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            git tag --force "$TAG" "${GITHUB_SHA}"
-            git push origin "refs/tags/$TAG" --force
-            gh release edit "$TAG" --title "AniScale ${TAG}" --notes-file release-notes.md
-            gh release upload "$TAG" \
-              "dist/AniScale-Android-v${VERSION}.apk" \
-              "dist/AniScale-iOS-unsigned-v${VERSION}.ipa" \
-              dist/SHA256SUMS.txt --clobber
-          else
-            gh release create "$TAG" \
-              "dist/AniScale-Android-v${VERSION}.apk" \
-              "dist/AniScale-iOS-unsigned-v${VERSION}.ipa" \
-              dist/SHA256SUMS.txt \
-              --target "${GITHUB_SHA}" \
-              --title "AniScale ${TAG}" \
-              --notes-file release-notes.md \
-              --latest
+            echo "Release $TAG already exists. Choose a new version; published releases are immutable." >&2
+            exit 1
           fi
+          gh release create "$TAG" \
+            "dist/AniScale-Android-v${VERSION}.apk" \
+            "dist/AniScale-iOS-unsigned-v${VERSION}.ipa" \
+            dist/SHA256SUMS.txt \
+            --target "${GITHUB_SHA}" \
+            --title "AniScale ${TAG}" \
+            --notes-file release-notes.md \
+            --latest
