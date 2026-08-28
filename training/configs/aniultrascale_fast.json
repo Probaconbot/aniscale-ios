@@ -1,6 +1,6 @@
 {
   "name": "AniUltraScale FAST",
-  "architecture": "aniultrascale-recurrent-v1",
+  "architecture": "aniultrascale-realvsr-fani-dual-v2",
   "scale": 2,
   "sequence_length": 5,
   "hr_patch_size": 384,
@@ -11,10 +11,13 @@
   "ema_decay": 0.999,
   "model": {
     "channels": 32,
+    "cleaning_blocks": 2,
+    "cleaning_stages": 2,
     "temporal_blocks": 6,
     "reconstruction_blocks": 3
   },
   "loss": {
+    "cleaning": 0.20,
     "charbonnier": 1.0,
     "edge": 0.18,
     "frequency": 0.14,

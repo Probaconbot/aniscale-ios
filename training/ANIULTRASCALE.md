@@ -6,7 +6,9 @@ AniUltraScale is AniScale's native **2x temporal video-restoration model**. It i
 
 ```text
 five LR frames
+  -> iterative real-video cleaning
   -> shared feature encoder
+  -> gated previous/current/next frame interaction
   -> forward + backward recurrent propagation
   -> temporal structure fusion
   -> base reconstruction
@@ -24,10 +26,10 @@ Creative v1 is still bounded restoration, not diffusion. The detail head is trai
 
 ## Licensed foundations
 
-- RealBasicVSR is the research/training reference for real-world video restoration and reconstruction-first training (Apache-2.0).
+- RealBasicVSR provides the cleaning-before-propagation and reconstruction-first training foundation (Apache-2.0).
 - NanoVSR informs the lightweight recurrent propagation and deploy-time convolution reparameterisation (MIT).
-- FANI informs the mobile/TFLite deployment constraints (MIT).
-- The independently implemented fidelity/detail controls use a general published idea. No PiSA-SR source is copied because that repository currently has no declared software licence.
+- FANI provides the mobile inter-frame interaction and deployment reference (MIT).
+- The independently implemented fidelity/detail controls use PiSA-SR's published adjustable pixel/semantic idea. AniScale does not embed PiSA's Stable Diffusion network or copy its code into the mobile student.
 
 See `THIRD_PARTY_NOTICES.md` for links and attribution.
 
@@ -87,7 +89,7 @@ python training/train_aniultrascale.py \
   --output training/runs/aniultrascale-quality
 ```
 
-The objective combines Charbonnier reconstruction, Sobel edge fidelity, high-frequency FFT,
+The objective combines low-resolution cleaning supervision, Charbonnier reconstruction, Sobel edge fidelity, high-frequency FFT,
 local-contrast and Laplacian-pyramid supervision, optical-flow-aligned temporal residuals,
 fidelity-head supervision, detail-residual supervision, and perceptual structure matching.
 

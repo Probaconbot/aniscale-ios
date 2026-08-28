@@ -31,12 +31,13 @@ def main() -> None:
     }:
         raise RuntimeError("AniUltraScale FAST and QUALITY configs are both required")
     for config in ultra_configs:
-        if config["architecture"] != "aniultrascale-recurrent-v1":
-            raise RuntimeError("AniUltraScale must use its temporal architecture")
+        if config["architecture"] != "aniultrascale-realvsr-fani-dual-v2":
+            raise RuntimeError("AniUltraScale must use its real-VSR/FANI dual-control architecture")
         if int(config["scale"]) != 2 or int(config["sequence_length"]) != 5:
-            raise RuntimeError("AniUltraScale v1 must use native 2x five-frame clips")
+            raise RuntimeError("AniUltraScale v2 must use native 2x five-frame clips")
         loss = dict(config["loss"])
         for required in (
+            "cleaning",
             "charbonnier",
             "edge",
             "frequency",
@@ -48,6 +49,14 @@ def main() -> None:
         ):
             if float(loss.get(required, 0)) <= 0:
                 raise RuntimeError(f"AniUltraScale is missing its {required} loss")
+    upstreams = json.loads((ROOT / "upstreams.json").read_text(encoding="utf-8"))
+    expected_upstreams = {"RealBasicVSR", "FANI", "PiSA-SR"}
+    if {item["name"] for item in upstreams} != expected_upstreams:
+        raise RuntimeError("AniUltraScale upstream provenance is incomplete")
+    for upstream in upstreams:
+        revision = upstream["revision"]
+        if len(revision) != 40 or any(character not in "0123456789abcdef" for character in revision):
+            raise RuntimeError(f"{upstream['name']} does not use an immutable commit revision")
     sources = json.loads(
         (ROOT / "datasets" / "open_media_sources.json").read_text(encoding="utf-8")
     )

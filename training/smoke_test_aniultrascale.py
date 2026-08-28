@@ -23,6 +23,8 @@ def main() -> None:
     config = copy.deepcopy(config)
     config["model"] = {
         "channels": 8,
+        "cleaning_blocks": 1,
+        "cleaning_stages": 1,
         "temporal_blocks": 1,
         "reconstruction_blocks": 1,
     }
@@ -34,6 +36,7 @@ def main() -> None:
         components = model.forward_sequence_components(frames, controls)
         before = model(frames, controls)
     assert components["output"].shape == (1, 5, 3, 32, 32)
+    assert components["cleaned"].shape == frames.shape
     assert before.shape == (1, 3, 32, 32)
     assert torch.isfinite(before).all()
     model.switch_to_deploy()

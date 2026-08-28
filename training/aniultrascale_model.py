@@ -1,9 +1,10 @@
-"""AniUltraScale: mobile-friendly 2x recurrent video super-resolution.
+"""AniUltraScale: mobile-friendly 2x real-world video super-resolution.
 
-The implementation is original AniScale code. Its propagation and deploy-time
-reparameterisation are informed by the MIT-licensed NanoVSR project, while the
-separate fidelity/detail controls implement a general published idea without
-copying PiSA-SR source code.
+The implementation is original AniScale code. It combines RealBasicVSR's
+iterative cleaning-before-propagation principle with FANI-style lightweight
+inter-frame feature aggregation. Separate fidelity/detail residual controls
+implement PiSA-SR's published adjustable restoration concept without embedding
+its diffusion network in the mobile student.
 """
 
 from __future__ import annotations
@@ -103,6 +104,55 @@ class PropagationStack(nn.Module):
         return self.body(self.input(torch.cat((current, state), dim=1)))
 
 
+class ImageCleaningStage(nn.Module):
+    """Iteratively removes real-video degradation before temporal propagation."""
+
+    def __init__(
+        self,
+        channels: int,
+        blocks: int,
+        stages: int,
+        deploy: bool = False,
+    ) -> None:
+        super().__init__()
+        self.stages = stages
+        self.input = nn.Conv2d(3, channels, 3, 1, 1)
+        self.body = nn.Sequential(*(RepBlock(channels, deploy) for _ in range(blocks)))
+        self.output = nn.Conv2d(channels, 3, 3, 1, 1)
+
+    def forward(self, frames: torch.Tensor) -> torch.Tensor:
+        batch, count, channels, height, width = frames.shape
+        cleaned = frames
+        for _ in range(self.stages):
+            flat = cleaned.reshape(batch * count, channels, height, width)
+            residual = self.output(self.body(self.input(flat))).reshape_as(cleaned)
+            cleaned = (cleaned + residual).clamp(0.0, 1.0)
+        return cleaned
+
+
+class InterFrameAggregator(nn.Module):
+    """Flow-free neighboring-frame interaction suitable for mobile export."""
+
+    def __init__(self, channels: int) -> None:
+        super().__init__()
+        self.neighbors = nn.Conv2d(channels * 2, channels, 3, 1, 1)
+        self.gate = nn.Sequential(
+            nn.Conv2d(channels * 2, channels, 3, 1, 1),
+            nn.Sigmoid(),
+        )
+        self.refine = nn.Conv2d(channels, channels, 3, 1, 1)
+
+    def forward(
+        self,
+        previous: torch.Tensor,
+        current: torch.Tensor,
+        following: torch.Tensor,
+    ) -> torch.Tensor:
+        neighbor_features = self.neighbors(torch.cat((previous, following), dim=1))
+        interaction = self.gate(torch.cat((current, neighbor_features), dim=1))
+        return current + self.refine(neighbor_features * interaction)
+
+
 class ResidualHead(nn.Module):
     def __init__(self, channels: int, blocks: int, scale: int) -> None:
         super().__init__()
@@ -127,6 +177,8 @@ class AniUltraScale(nn.Module):
     def __init__(
         self,
         channels: int = 32,
+        cleaning_blocks: int = 3,
+        cleaning_stages: int = 2,
         temporal_blocks: int = 8,
         reconstruction_blocks: int = 4,
         scale: int = 2,
@@ -136,14 +188,20 @@ class AniUltraScale(nn.Module):
         if scale != 2:
             raise ValueError("AniUltraScale's first shipping architecture is native 2x")
         self.channels = channels
+        self.cleaning_blocks = cleaning_blocks
+        self.cleaning_stages = cleaning_stages
         self.temporal_blocks = temporal_blocks
         self.reconstruction_blocks = reconstruction_blocks
         self.scale = scale
+        self.cleaner = ImageCleaningStage(
+            channels, cleaning_blocks, cleaning_stages, deploy
+        )
         self.encoder = nn.Sequential(
             nn.Conv2d(3, channels, 3, 1, 1),
             nn.LeakyReLU(0.1, inplace=True),
             RepBlock(channels, deploy),
         )
+        self.inter_frame = InterFrameAggregator(channels)
         self.forward_propagation = PropagationStack(channels, temporal_blocks, deploy)
         self.backward_propagation = PropagationStack(channels, temporal_blocks, deploy)
         self.structure_fusion = nn.Sequential(
@@ -195,8 +253,17 @@ class AniUltraScale(nn.Module):
         batch, count, channels, height, width = frames.shape
         if count < 3:
             raise ValueError("AniUltraScale requires at least three adjacent frames")
-        flat = frames.reshape(batch * count, channels, height, width)
+        cleaned = self.cleaner(frames)
+        flat = cleaned.reshape(batch * count, channels, height, width)
         encoded = self.encoder(flat).reshape(batch, count, self.channels, height, width)
+        interacted = []
+        for position in range(count):
+            previous = encoded[:, max(0, position - 1)]
+            following = encoded[:, min(count - 1, position + 1)]
+            interacted.append(
+                self.inter_frame(previous, encoded[:, position], following)
+            )
+        encoded = torch.stack(interacted, dim=1)
         forwards, backwards = self._propagate(encoded)
         if controls is None:
             controls = self.controls_for_mode("detailed", batch, frames.device, frames.dtype)
@@ -213,7 +280,7 @@ class AniUltraScale(nn.Module):
                 torch.cat((encoded[:, position], forwards[position], backwards[position]), dim=1)
             )
             interpolated = F.interpolate(
-                frames[:, position], scale_factor=self.scale, mode="bilinear", align_corners=False
+                cleaned[:, position], scale_factor=self.scale, mode="bilinear", align_corners=False
             )
             base = interpolated + self.base_head(structure)
             fidelity = self.fidelity_head(structure)
@@ -224,6 +291,7 @@ class AniUltraScale(nn.Module):
             fidelity_residuals.append(fidelity)
             detail_residuals.append(detail)
         return {
+            "cleaned": cleaned,
             "output": torch.stack(outputs, dim=1),
             "base": torch.stack(bases, dim=1),
             "fidelity_residual": torch.stack(fidelity_residuals, dim=1),
@@ -251,6 +319,8 @@ def build_aniultrascale(config: dict[str, object]) -> AniUltraScale:
     model_config = dict(config["model"])
     return AniUltraScale(
         channels=int(model_config["channels"]),
+        cleaning_blocks=int(model_config.get("cleaning_blocks", 3)),
+        cleaning_stages=int(model_config.get("cleaning_stages", 2)),
         temporal_blocks=int(model_config["temporal_blocks"]),
         reconstruction_blocks=int(model_config["reconstruction_blocks"]),
         scale=int(config["scale"]),

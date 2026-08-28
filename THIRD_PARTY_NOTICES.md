@@ -20,6 +20,7 @@ permissively licensed projects:
 - FANI — https://github.com/kyrie2to11/FANI — MIT License
 - RealBasicVSR — https://github.com/ckkelvinchan/RealBasicVSR — Apache License 2.0
 
-No PiSA-SR source code is copied or distributed. Its published fidelity/semantic control concept
-is cited as research context only because its public repository does not currently include a
-declared software licence.
+PiSA-SR — https://github.com/csslc/PiSA-SR — is cited for its published adjustable
+pixel-fidelity/semantic-detail concept. No PiSA-SR source or diffusion weights are copied into
+AniUltraScale; the repository README states Apache 2.0, but the repository currently has no
+`LICENSE` file that can be packaged with redistributed code.

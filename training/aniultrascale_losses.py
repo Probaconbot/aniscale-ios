@@ -80,6 +80,15 @@ class AniUltraScaleLoss(nn.Module):
         prediction = components["output"]
         flat_prediction = prediction.flatten(0, 1)
         flat_target = target.flatten(0, 1)
+        cleaned = components["cleaned"]
+        cleaning_target = F.interpolate(
+            flat_target,
+            size=cleaned.shape[-2:],
+            mode="bicubic",
+            align_corners=False,
+            antialias=True,
+        ).reshape_as(cleaned)
+        cleaning = charbonnier(cleaned - cleaning_target)
         pixel = charbonnier(prediction - target)
         edge = charbonnier(sobel_edges(flat_prediction) - sobel_edges(flat_target))
         frequency = frequency_loss(flat_prediction, flat_target)
@@ -115,6 +124,7 @@ class AniUltraScaleLoss(nn.Module):
             perceptual = F.l1_loss(predicted_features, target_features)
 
         values = {
+            "cleaning": cleaning,
             "charbonnier": pixel,
             "edge": edge,
             "frequency": frequency,

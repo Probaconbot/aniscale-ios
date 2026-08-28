@@ -49,7 +49,7 @@ def save_checkpoint(
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
-            "format": "aniultrascale-v1",
+            "format": "aniultrascale-v2",
             "trained": True,
             "params": model.state_dict(),
             "params_ema": ema.state_dict(),
@@ -70,7 +70,7 @@ def load_resume(
     optimizer: torch.optim.Optimizer,
 ) -> int:
     checkpoint = torch.load(path, map_location="cpu", weights_only=True)
-    if checkpoint.get("format") != "aniultrascale-v1":
+    if checkpoint.get("format") != "aniultrascale-v2":
         raise RuntimeError("Resume checkpoint is not an AniUltraScale checkpoint")
     model.load_state_dict(checkpoint["params"], strict=True)
     ema.load_state_dict(checkpoint["params_ema"], strict=True)
@@ -120,7 +120,7 @@ def main() -> None:
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
     if int(config["scale"]) != 2 or int(config["sequence_length"]) != 5:
-        raise RuntimeError("AniUltraScale v1 training requires native 2x, five-frame clips")
+        raise RuntimeError("AniUltraScale v2 training requires native 2x, five-frame clips")
     if not torch.cuda.is_available() and not args.allow_cpu_smoke_test:
         raise RuntimeError(
             "AniUltraScale training requires CUDA. CPU mode is intentionally limited to smoke tests."

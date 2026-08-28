@@ -1,0 +1,26 @@
+[
+  {
+    "name": "RealBasicVSR",
+    "repository": "https://github.com/ckkelvinchan/RealBasicVSR",
+    "revision": "b908e08323c84e96b08f0d58621026ab27f56bcb",
+    "license": "Apache-2.0",
+    "role": "iterative real-video cleaning, recurrent restoration, and reconstruction-first training reference",
+    "source_copied": false
+  },
+  {
+    "name": "FANI",
+    "repository": "https://github.com/kyrie2to11/FANI",
+    "revision": "4286315b446de995aacb3fd7463d3a5ed39d96fb",
+    "license": "MIT",
+    "role": "lightweight neighboring-frame interaction and mobile deployment reference",
+    "source_copied": false
+  },
+  {
+    "name": "PiSA-SR",
+    "repository": "https://github.com/csslc/PiSA-SR",
+    "revision": "9c76e12e261d1980148738a0cff41e5e27d18c9f",
+    "license": "README claims Apache-2.0; LICENSE file absent at pinned revision",
+    "role": "published adjustable pixel-fidelity versus semantic-detail concept only",
+    "source_copied": false
+  }
+]

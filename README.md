@@ -46,9 +46,11 @@ a physical-iPhone benchmark schema. Fine-tuned weights and benchmark numbers are
 training data, a CUDA run, and an Instruments trace on an actual iPhone have completed.
 
 [AniUltraScale](training/ANIULTRASCALE.md) is the next, separate video engine: a native 2x,
-five-frame recurrent VSR model with forward/backward temporal propagation and independent fidelity
-and detail residual controls. FAST and QUALITY configurations, real-video degradation, temporal,
-frequency, and edge losses, and guarded Core ML/ONNX export are versioned in the repository.
+five-frame real-world VSR model with RealBasicVSR-style iterative input cleaning, FANI-style
+gated neighboring-frame interaction, forward/backward recurrent propagation, and independent
+PiSA-style fidelity/detail residual controls. FAST and QUALITY configurations, real-video
+degradation, cleaning, temporal, frequency, and edge losses, and guarded Core ML/ONNX export are
+versioned in the repository.
 AniUltraScale is not listed as a released engine until trained weights and physical Android/iPhone
 benchmarks pass the documented release gate.
 

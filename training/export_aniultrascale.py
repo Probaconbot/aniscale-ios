@@ -32,7 +32,7 @@ class CenterFrameExport(nn.Module):
 def load_trained(path: Path) -> tuple[AniUltraScale, dict[str, object], dict[str, object]]:
     checkpoint = torch.load(path, map_location="cpu", weights_only=True)
     if (
-        checkpoint.get("format") != "aniultrascale-v1"
+        checkpoint.get("format") != "aniultrascale-v2"
         or checkpoint.get("trained") is not True
         or not checkpoint.get("dataset_manifest_sha256")
     ):
@@ -138,7 +138,7 @@ def main() -> None:
         export_coreml(wrapper, frames, controls, coreml_path, variant)
         artifacts["coreml"] = {"path": str(coreml_path)}
     report = {
-        "format": "aniultrascale-mobile-export-v1",
+        "format": "aniultrascale-mobile-export-v2",
         "trained": True,
         "variant": variant,
         "scale": 2,
