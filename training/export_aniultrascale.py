@@ -124,7 +124,7 @@ def main() -> None:
         int(deployment["input_height"]),
         int(deployment["input_width"]),
     )
-    controls = torch.tensor([[1.0, 0.62]], dtype=torch.float32)
+    controls = torch.tensor([[1.0, 0.82]], dtype=torch.float32)
     wrapper = CenterFrameExport(model).eval()
     args.output.mkdir(parents=True, exist_ok=True)
     variant = str(config["name"]).split()[-1].lower()
@@ -159,4 +159,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

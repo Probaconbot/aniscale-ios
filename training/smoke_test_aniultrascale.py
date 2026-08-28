@@ -29,7 +29,7 @@ def main() -> None:
     torch.manual_seed(20260828)
     model = build_aniultrascale(config).eval()
     frames = torch.rand(1, 5, 3, 16, 16)
-    controls = torch.tensor([[1.0, 0.62]])
+    controls = torch.tensor([[1.0, 0.82]])
     with torch.inference_mode():
         components = model.forward_sequence_components(frames, controls)
         before = model(frames, controls)
@@ -49,4 +49,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

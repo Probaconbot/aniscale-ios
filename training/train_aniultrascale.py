@@ -193,7 +193,7 @@ def main() -> None:
         # Vary the detail mix during training so one checkpoint supports the
         # Subtle/Detailed/Creative controls without three resident networks.
         fidelity = torch.empty(low_quality.shape[0], device=device).uniform_(0.86, 1.0)
-        detail = torch.empty(low_quality.shape[0], device=device).uniform_(0.18, 1.0)
+        detail = torch.empty(low_quality.shape[0], device=device).uniform_(0.32, 1.20)
         controls = torch.stack((fidelity, detail), dim=1).to(low_quality.dtype)
         with torch.autocast(
             device_type=device.type,
@@ -254,4 +254,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

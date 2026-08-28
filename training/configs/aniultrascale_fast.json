@@ -16,12 +16,14 @@
   },
   "loss": {
     "charbonnier": 1.0,
-    "edge": 0.15,
-    "frequency": 0.10,
+    "edge": 0.18,
+    "frequency": 0.14,
+    "local_contrast": 0.10,
+    "laplacian": 0.12,
     "temporal": 0.25,
     "fidelity": 0.20,
-    "detail": 0.08,
-    "perceptual": 0.0
+    "detail": 0.12,
+    "perceptual": 0.02
   },
   "deployment": {
     "frames": 5,

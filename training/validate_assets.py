@@ -40,6 +40,8 @@ def main() -> None:
             "charbonnier",
             "edge",
             "frequency",
+            "local_contrast",
+            "laplacian",
             "temporal",
             "fidelity",
             "detail",

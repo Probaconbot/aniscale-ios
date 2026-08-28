@@ -22,9 +22,9 @@ class UltraControls:
 
 
 MODE_CONTROLS = {
-    "subtle": UltraControls(1.00, 0.20),
-    "detailed": UltraControls(1.00, 0.62),
-    "creative": UltraControls(0.86, 1.00),
+    "subtle": UltraControls(1.00, 0.35),
+    "detailed": UltraControls(1.00, 0.82),
+    "creative": UltraControls(0.86, 1.20),
 }
 
 
@@ -255,4 +255,3 @@ def build_aniultrascale(config: dict[str, object]) -> AniUltraScale:
         reconstruction_blocks=int(model_config["reconstruction_blocks"]),
         scale=int(config["scale"]),
     )
-

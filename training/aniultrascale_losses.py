@@ -24,6 +24,46 @@ def frequency_loss(prediction: torch.Tensor, target: torch.Tensor) -> torch.Tens
     return (torch.abs(predicted_fft - target_fft) * weights).mean()
 
 
+def local_contrast_loss(prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    def deviation(value: torch.Tensor) -> torch.Tensor:
+        mean = F.avg_pool2d(value, kernel_size=7, stride=1, padding=3)
+        mean_square = F.avg_pool2d(value.square(), kernel_size=7, stride=1, padding=3)
+        return torch.sqrt((mean_square - mean.square()).clamp_min(1e-6))
+
+    return charbonnier(deviation(prediction) - deviation(target))
+
+
+def laplacian_pyramid_loss(
+    prediction: torch.Tensor, target: torch.Tensor, levels: int = 3
+) -> torch.Tensor:
+    losses = []
+    current_prediction = prediction
+    current_target = target
+    for _ in range(levels):
+        prediction_low = F.avg_pool2d(current_prediction, 2, 2)
+        target_low = F.avg_pool2d(current_target, 2, 2)
+        prediction_up = F.interpolate(
+            prediction_low,
+            size=current_prediction.shape[-2:],
+            mode="bilinear",
+            align_corners=False,
+        )
+        target_up = F.interpolate(
+            target_low,
+            size=current_target.shape[-2:],
+            mode="bilinear",
+            align_corners=False,
+        )
+        losses.append(
+            charbonnier(
+                (current_prediction - prediction_up) - (current_target - target_up)
+            )
+        )
+        current_prediction = prediction_low
+        current_target = target_low
+    return torch.stack(losses).mean()
+
+
 class AniUltraScaleLoss(nn.Module):
     def __init__(self, weights: dict[str, float], scale: int = 2) -> None:
         super().__init__()
@@ -43,6 +83,8 @@ class AniUltraScaleLoss(nn.Module):
         pixel = charbonnier(prediction - target)
         edge = charbonnier(sobel_edges(flat_prediction) - sobel_edges(flat_target))
         frequency = frequency_loss(flat_prediction, flat_target)
+        local_contrast = local_contrast_loss(flat_prediction, flat_target)
+        laplacian = laplacian_pyramid_loss(flat_prediction, flat_target)
 
         temporal_terms = []
         for position in range(1, prediction.shape[1]):
@@ -76,6 +118,8 @@ class AniUltraScaleLoss(nn.Module):
             "charbonnier": pixel,
             "edge": edge,
             "frequency": frequency,
+            "local_contrast": local_contrast,
+            "laplacian": laplacian,
             "temporal": temporal,
             "fidelity": fidelity,
             "detail": detail,
@@ -85,4 +129,3 @@ class AniUltraScaleLoss(nn.Module):
         metrics = {"loss": float(total.detach())}
         metrics.update({name: float(value.detach()) for name, value in values.items()})
         return total, metrics
-

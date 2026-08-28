@@ -16,9 +16,9 @@ five LR frames
 
 The app modes use one checkpoint and two runtime controls:
 
-- **Subtle:** fidelity 1.00, detail 0.20
-- **Detailed:** fidelity 1.00, detail 0.62
-- **Creative:** fidelity 0.86, detail 1.00
+- **Subtle:** fidelity 1.00, detail 0.35
+- **Detailed:** fidelity 1.00, detail 0.82
+- **Creative:** fidelity 0.86, detail 1.20
 
 Creative v1 is still bounded restoration, not diffusion. The detail head is trained against the real target's high-frequency residual, so increasing it does not silently authorize unrelated faces or textures.
 
@@ -64,10 +64,12 @@ python training/prepare_video_dataset.py \
 
 The pipeline applies blur, temporally mixed motion blur, sensor-like noise, resampling, chroma loss, H.264/H.265 compression, low bitrates, ringing, repeated encode generations, social-media compression, and smooth exposure/saturation drift. It does not create bicubic-only pairs.
 
-The first training stage deliberately uses no GAN and no perceptual loss. QUALITY introduces only
-a low perceptual weight after reconstruction and temporal stability are established. This keeps
-skin, gradients, and animation shading smooth while the edge and frequency objectives recover real
-detail without aggressive sharpening halos.
+AniUltraScale is not trained to reproduce Real-ESRGAN's soft/smoothed look. Edge, FFT-frequency,
+local-contrast, Laplacian-pyramid, and detail-residual supervision explicitly reward fine texture
+and crisp boundaries. FAST uses a small perceptual term and QUALITY uses a stronger one. GAN remains
+off initially because temporal consistency and correct structure must be learned before any
+adversarial texture stage; sharpness still has to come from the real HR target rather than a generic
+post-sharpening filter.
 
 ## Train
 
@@ -85,7 +87,9 @@ python training/train_aniultrascale.py \
   --output training/runs/aniultrascale-quality
 ```
 
-The objective combines Charbonnier reconstruction, Sobel edge fidelity, high-frequency FFT supervision, optical-flow-aligned temporal residuals, fidelity-head supervision, detail-residual supervision, and a low perceptual weight in QUALITY.
+The objective combines Charbonnier reconstruction, Sobel edge fidelity, high-frequency FFT,
+local-contrast and Laplacian-pyramid supervision, optical-flow-aligned temporal residuals,
+fidelity-head supervision, detail-residual supervision, and perceptual structure matching.
 
 ## Export
 
