@@ -18,7 +18,7 @@ void main() {
   testWidgets('branded launch transitions to the app at three seconds', (
     tester,
   ) async {
-    await tester.pumpWidget(const AniScaleApp());
+    await tester.pumpWidget(const AniScaleApp(playIntroAudio: false));
 
     expect(find.text('Welcome to AniScale'), findsOneWidget);
     await tester.pump(const Duration(seconds: 3));

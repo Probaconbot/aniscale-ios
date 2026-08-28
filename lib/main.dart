@@ -24,9 +24,14 @@ void main() {
 }
 
 class AniScaleApp extends StatelessWidget {
-  const AniScaleApp({super.key, this.showIntro = true});
+  const AniScaleApp({
+    super.key,
+    this.showIntro = true,
+    this.playIntroAudio = true,
+  });
 
   final bool showIntro;
+  final bool playIntroAudio;
 
   @override
   Widget build(BuildContext context) {
@@ -34,13 +39,17 @@ class AniScaleApp extends StatelessWidget {
       title: 'AniScale',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark,
-      home: showIntro ? const LaunchExperience() : const AppShell(),
+      home: showIntro
+          ? LaunchExperience(playAudio: playIntroAudio)
+          : const AppShell(),
     );
   }
 }
 
 class LaunchExperience extends StatefulWidget {
-  const LaunchExperience({super.key});
+  const LaunchExperience({super.key, this.playAudio = true});
+
+  final bool playAudio;
 
   @override
   State<LaunchExperience> createState() => _LaunchExperienceState();
@@ -66,18 +75,25 @@ class _LaunchExperienceState extends State<LaunchExperience>
   }
 
   Future<void> _startLaunch() async {
-    try {
-      await Future.wait([
-        _voice.setSource(AssetSource('audio/voice.mp3')),
-        _sfx.setSource(AssetSource('audio/sfx.mp3')),
-      ]);
-      await _voice.resume();
-    } catch (_) {
-      // The visual launch must never block the app if audio is unavailable.
+    if (widget.playAudio) {
+      try {
+        await Future.wait([
+          _voice.setSource(AssetSource('audio/voice.mp3')),
+          _sfx.setSource(AssetSource('audio/sfx.mp3')),
+        ]);
+        await _voice.resume();
+      } catch (_) {
+        // The visual launch must never block the app if audio is unavailable.
+      }
     }
     if (!mounted) return;
     _animation.forward();
-    _sfxTimer = Timer(const Duration(seconds: 1), () => unawaited(_playSfx()));
+    if (widget.playAudio) {
+      _sfxTimer = Timer(
+        const Duration(seconds: 1),
+        () => unawaited(_playSfx()),
+      );
+    }
     _openTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) setState(() => _opened = true);
     });
