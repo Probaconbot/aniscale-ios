@@ -35,6 +35,25 @@ See `THIRD_PARTY_NOTICES.md` for links and attribution.
 
 Use only video that is licensed for model training. Keep productions and identities separated between training and validation.
 
+Build a storage-capped, attributed source collection from the curated Blender films and
+licence-filtered Wikimedia Commons categories:
+
+```bash
+python training/acquire_open_media.py \
+  --output /gpu-storage/aniscale-open-media \
+  --max-gb 100 \
+  --commons-per-category 100 \
+  --acknowledge-licenses
+
+python training/build_still_motion_clips.py \
+  --acquired /gpu-storage/aniscale-open-media \
+  --output /gpu-storage/aniscale-open-media/still-motion
+```
+
+`attribution_manifest.json` is mandatory. Unknown, NonCommercial, NoDerivatives, random
+YouTube/anime, and Vimeo API media are rejected. The acquisition tool also requires 2 GB of free
+space beyond its explicit budget, so it cannot silently fill a workstation drive.
+
 ```bash
 python training/prepare_video_dataset.py \
   --source training/data/source \
@@ -44,6 +63,11 @@ python training/prepare_video_dataset.py \
 ```
 
 The pipeline applies blur, temporally mixed motion blur, sensor-like noise, resampling, chroma loss, H.264/H.265 compression, low bitrates, ringing, repeated encode generations, social-media compression, and smooth exposure/saturation drift. It does not create bicubic-only pairs.
+
+The first training stage deliberately uses no GAN and no perceptual loss. QUALITY introduces only
+a low perceptual weight after reconstruction and temporal stability are established. This keeps
+skin, gradients, and animation shading smooth while the edge and frequency objectives recover real
+detail without aggressive sharpening halos.
 
 ## Train
 
@@ -87,4 +111,3 @@ Do not publish AniUltraScale until both FAST and QUALITY have:
 3. real-device FPS, seconds per video minute, memory, CPU/GPU/ANE/NPU use, and thermal results;
 4. a matching checkpoint/export SHA-256 manifest;
 5. working audio remuxing, cancel, progress, save/share, and history on Android and iOS.
-

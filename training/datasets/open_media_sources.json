@@ -1,0 +1,86 @@
+{
+  "format": "aniscale-open-training-sources-v1",
+  "accepted_licenses": [
+    "CC0",
+    "Public domain",
+    "CC BY 2.0",
+    "CC BY 3.0",
+    "CC BY 4.0"
+  ],
+  "policy": {
+    "require_attribution_manifest": true,
+    "exclude_noncommercial": true,
+    "exclude_no_derivatives": true,
+    "exclude_unknown_license": true,
+    "exclude_vimeo_api": true,
+    "exclude_youtube_scraping": true
+  },
+  "curated_videos": [
+    {
+      "id": "blender-sintel-1080p",
+      "url": "https://download.blender.org/durian/movies/Sintel.2010.1080p.mkv",
+      "media_type": "video",
+      "expected_bytes": 1180090590,
+      "license": "CC BY 3.0",
+      "license_url": "https://durian.blender.org/sharing/",
+      "source_page": "https://durian.blender.org/about/",
+      "creator": "Blender Foundation / Durian team",
+      "attribution": "© Blender Foundation | durian.blender.org",
+      "content": ["stylized 3D", "faces", "hair", "cloth", "snow", "fire", "fast motion"]
+    },
+    {
+      "id": "blender-big-buck-bunny-1080p",
+      "url": "https://download.blender.org/peach/bigbuckbunny_movies/big_buck_bunny_1080p_h264.mov.zip",
+      "media_type": "video_zip",
+      "expected_bytes": 725106348,
+      "license": "CC BY 3.0",
+      "license_url": "https://peach.blender.org/about/",
+      "source_page": "https://peach.blender.org/download/",
+      "creator": "Blender Foundation / Peach team",
+      "attribution": "© Blender Foundation | peach.blender.org",
+      "content": ["stylized 3D", "fur", "grass", "foliage", "water", "fast motion"]
+    }
+  ],
+  "commons_categories": [
+    "3D animations",
+    "Animated films",
+    "Computer-generated imagery",
+    "Textures",
+    "Hair",
+    "Textile textures",
+    "Brick walls",
+    "Road surfaces",
+    "Machinery",
+    "Grass",
+    "Foliage",
+    "Buildings",
+    "Water surfaces",
+    "Night photography"
+  ],
+  "reference_only": [
+    {
+      "name": "Open Images V7",
+      "url": "https://storage.googleapis.com/openimages/web/index.html",
+      "reason": "Images are listed as CC BY 2.0, but the official dataset warns that each source licence should be verified individually. Use only through a licence-verifying importer."
+    },
+    {
+      "name": "REDS",
+      "url": "https://seungjunnah.github.io/Datasets/reds.html",
+      "reason": "Excellent VSR benchmark, but the public landing page does not provide a clear commercial-training licence. Obtain written permission before release training."
+    }
+  ],
+  "excluded": [
+    {
+      "name": "Vimeo API and scraped Vimeo content",
+      "reason": "Vimeo's current Developer Addendum prohibits using Vimeo Content for AI training unless the user owns or separately controls all necessary rights."
+    },
+    {
+      "name": "Random YouTube/anime/film clips",
+      "reason": "Public availability is not a training licence."
+    },
+    {
+      "name": "Tears of Steel actor footage",
+      "reason": "The Blender project notes continuing portrait and privacy rights for actors; excluded from a public product training corpus without a dedicated review."
+    }
+  ]
+}

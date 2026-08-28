@@ -46,6 +46,29 @@ def main() -> None:
         ):
             if float(loss.get(required, 0)) <= 0:
                 raise RuntimeError(f"AniUltraScale is missing its {required} loss")
+    sources = json.loads(
+        (ROOT / "datasets" / "open_media_sources.json").read_text(encoding="utf-8")
+    )
+    policy = dict(sources["policy"])
+    if not all(
+        policy.get(key) is True
+        for key in (
+            "require_attribution_manifest",
+            "exclude_noncommercial",
+            "exclude_no_derivatives",
+            "exclude_unknown_license",
+            "exclude_vimeo_api",
+            "exclude_youtube_scraping",
+        )
+    ):
+        raise RuntimeError("The open-media acquisition policy must fail closed")
+    accepted_licenses = set(sources["accepted_licenses"])
+    for source in sources["curated_videos"]:
+        if source["license"] not in accepted_licenses:
+            raise RuntimeError(f"Curated source has an unapproved licence: {source['id']}")
+        for required in ("url", "license_url", "creator", "attribution", "expected_bytes"):
+            if not source.get(required):
+                raise RuntimeError(f"Curated source {source['id']} is missing {required}")
     reference = json.loads(
         (ROOT / "references" / "acceptance.json").read_text(encoding="utf-8")
     )
