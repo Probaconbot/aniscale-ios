@@ -211,10 +211,10 @@ class MainActivity : FlutterActivity() {
         cancelled.set(false)
         worker.execute {
             try {
-                if (engine == "ultra") {
-                    ultraSession
-                } else {
-                    ensureModels()
+                when (engine) {
+                    "ultra" -> ultraSession
+                    "clean" -> Unit
+                    else -> ensureModels()
                 }
                 val response = processVideo(path, scale, efficient, tileSize, engine)
                 runOnUiThread { result.success(response) }
@@ -328,12 +328,18 @@ class MainActivity : FlutterActivity() {
                     "turbo" -> 0.22f
                     else -> 0.28f
                 }
-                val enhanced = if (engine == "ultra") {
-                    upscaleUltraExperimental(rgba)
-                } else {
-                    nativeUpscale(
+                val enhanced = when (engine) {
+                    "ultra" -> upscaleUltraExperimental(rgba)
+                    // Avoid neural re-amplification of residual scanlines.
+                    "clean" -> Bitmap.createScaledBitmap(
                         rgba,
-                        if (engine == "clean") "fusion" else engine,
+                        outputWidth,
+                        outputHeight,
+                        true,
+                    )
+                    else -> nativeUpscale(
+                        rgba,
+                        engine,
                         scale,
                         tileSize,
                         modelSharpness,
@@ -393,6 +399,8 @@ class MainActivity : FlutterActivity() {
 
     private fun backendLabel(engine: String? = null): String = if (engine == "ultra") {
         "ONNX Runtime — untrained"
+    } else if (engine == "clean") {
+        "Native restoration + Lanczos"
     } else if (nativeUsesVulkan()) {
         "Android ncnn Vulkan FP16"
     } else {
@@ -416,25 +424,43 @@ class MainActivity : FlutterActivity() {
         val width = bitmap.width
         val height = bitmap.height
         val source = IntArray(width * height)
+        val horizontal = IntArray(source.size)
         val output = IntArray(source.size)
         bitmap.getPixels(source, 0, width, 0, 0, width, height)
+        // First remove the vertical display-line component with a five-tap
+        // horizontal low-pass. Two passes are faster than a full 5x3 kernel.
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                val index = y * width + x
+                val p2l = source[y * width + max(0, x - 2)]
+                val p1l = source[y * width + max(0, x - 1)]
+                val p = source[index]
+                val p1r = source[y * width + min(width - 1, x + 1)]
+                val p2r = source[y * width + min(width - 1, x + 2)]
+                val r = (((p shr 16) and 255) * 2 + ((p1l shr 16) and 255) * 2 + ((p1r shr 16) and 255) * 2 + ((p2l shr 16) and 255) + ((p2r shr 16) and 255)) / 8
+                val g = (((p shr 8) and 255) * 2 + ((p1l shr 8) and 255) * 2 + ((p1r shr 8) and 255) * 2 + ((p2l shr 8) and 255) + ((p2r shr 8) and 255)) / 8
+                val b = ((p and 255) * 2 + (p1l and 255) * 2 + (p1r and 255) * 2 + (p2l and 255) + (p2r and 255)) / 8
+                horizontal[index] = (p and -0x1000000) or (r shl 16) or (g shl 8) or b
+            }
+        }
+        // Then suppress horizontal scanlines and perform green-cast removal.
         for (y in 0 until height) {
             val above = max(0, y - 1)
             val below = min(height - 1, y + 1)
             for (x in 0 until width) {
                 val index = y * width + x
-                val p = source[index]
-                val pa = source[above * width + x]
-                val pb = source[below * width + x]
-                var r = (((p shr 16) and 255) * 6 + ((pa shr 16) and 255) + ((pb shr 16) and 255)) / 8
-                var g = (((p shr 8) and 255) * 6 + ((pa shr 8) and 255) + ((pb shr 8) and 255)) / 8
-                var b = ((p and 255) * 6 + (pa and 255) + (pb and 255)) / 8
+                val p = horizontal[index]
+                val pa = horizontal[above * width + x]
+                val pb = horizontal[below * width + x]
+                var r = (((p shr 16) and 255) * 2 + ((pa shr 16) and 255) + ((pb shr 16) and 255)) / 4
+                var g = (((p shr 8) and 255) * 2 + ((pa shr 8) and 255) + ((pb shr 8) and 255)) / 4
+                var b = ((p and 255) * 2 + (pa and 255) + (pb and 255)) / 4
                 val neutral = (r + b) / 2
-                if (g > neutral) g = (neutral + (g - neutral) * 0.45f).roundToInt()
-                r = ((r - 128) * 1.06f + 130).roundToInt().coerceIn(0, 255)
-                g = ((g - 128) * 1.04f + 128).roundToInt().coerceIn(0, 255)
-                b = ((b - 128) * 1.06f + 130).roundToInt().coerceIn(0, 255)
-                output[index] = (p and -0x1000000) or (r shl 16) or (g shl 8) or b
+                if (g > neutral) g = (neutral + (g - neutral) * 0.12f).roundToInt()
+                r = ((r - 128) * 1.03f + 132).roundToInt().coerceIn(0, 255)
+                g = ((g - 128) * 1.01f + 126).roundToInt().coerceIn(0, 255)
+                b = ((b - 128) * 1.03f + 133).roundToInt().coerceIn(0, 255)
+                output[index] = (source[index] and -0x1000000) or (r shl 16) or (g shl 8) or b
             }
         }
         return Bitmap.createBitmap(output, width, height, Bitmap.Config.ARGB_8888)

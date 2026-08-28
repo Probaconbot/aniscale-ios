@@ -550,6 +550,12 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
             (ProcessInfo.processInfo.systemUptime - inferenceStarted) * 1_000
           )
           emitProgress(min(0.92, frameStart + frameStep))
+        } else if engine == "clean" {
+          // Do not feed patterned footage into a generative SR model: it can
+          // turn residual scanlines into stronger false detail. Clean uses the
+          // restored frame and the final Lanczos fit below.
+          enhancedImage = frameImage
+          emitProgress(min(0.92, frameStart + frameStep))
         } else {
           let enhanced = try upscale(
             image: UIImage(cgImage: frameImage),
@@ -654,28 +660,30 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     let balanced = image.applyingFilter(
       "CIColorMatrix",
       parameters: [
-        "inputRVector": CIVector(x: 1.06, y: 0, z: 0, w: 0),
-        "inputGVector": CIVector(x: 0, y: 0.91, z: 0, w: 0),
-        "inputBVector": CIVector(x: 0, y: 0, z: 1.04, w: 0),
-        "inputBiasVector": CIVector(x: 0.005, y: 0, z: 0.005, w: 0)
+        "inputRVector": CIVector(x: 1.13, y: 0, z: 0, w: 0),
+        "inputGVector": CIVector(x: 0, y: 0.76, z: 0, w: 0),
+        "inputBVector": CIVector(x: 0, y: 0, z: 1.15, w: 0),
+        "inputBiasVector": CIVector(x: 0.012, y: 0, z: 0.014, w: 0)
       ]
     )
     let cleaned = balanced.applyingFilter(
       "CINoiseReduction",
-      parameters: ["inputNoiseLevel": 0.035, "inputSharpness": 0.32]
+      parameters: ["inputNoiseLevel": 0.055, "inputSharpness": 0.12]
     )
     // A sub-pixel vertical blur suppresses fine horizontal scanline energy;
     // controlled luminance sharpening restores edges without strong halos.
     return cleaned
-      .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 0.55])
+      .applyingFilter("CIMedianFilter")
+      .cropped(to: extent)
+      .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 1.8])
       .cropped(to: extent)
       .applyingFilter(
         "CISharpenLuminance",
-        parameters: [kCIInputSharpnessKey: 0.34, "inputRadius": 1.1]
+        parameters: [kCIInputSharpnessKey: 0.08, "inputRadius": 1.0]
       )
       .applyingFilter(
         "CIColorControls",
-        parameters: [kCIInputContrastKey: 1.07, kCIInputSaturationKey: 0.94]
+        parameters: [kCIInputContrastKey: 1.03, kCIInputSaturationKey: 0.78]
       )
   }
 

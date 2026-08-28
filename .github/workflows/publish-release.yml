@@ -10,7 +10,7 @@ on:
       version:
         description: Release version without the v prefix
         required: true
-        default: 1.11.0
+        default: 1.12.0
         type: string
 
 permissions:
@@ -58,23 +58,30 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           cat > release-notes.md <<EOF
-          ## AniScale ${VERSION} — AniScale Clean and monochrome command interface
+          ## AniScale ${VERSION} — Clean restoration fix, launch audio, and touch glass
 
-          This release adds a separate restoration-first video path for damaged footage and rebuilds AniScale around a premium black-and-white command interface shared by Android and iOS.
+          This release fixes the cleanup regression that could amplify green casts and scanlines, adds a synchronized branded launch sequence, and upgrades the black-and-white interface with touch-reactive Liquid Glass.
 
           ### AniScale Clean
 
           - New video engine choice for footage with green casts, scanlines, moiré-like patterning, chroma noise, blur, and compression damage.
-          - Runs cleanup before the stable AniScale Fusion upscale path.
-          - Uses Core Image acceleration on iPhone and a bounded native Android cleanup pass to avoid a desktop CUDA dependency.
-          - Applies restrained color correction, pattern suppression, noise cleanup, local contrast, and edge recovery without aggressive face smoothing.
+          - Bypasses generative Fusion for damaged footage so residual scanlines are not hallucinated into stronger false detail.
+          - Uses stronger green neutralization, two-axis pattern suppression, restrained denoise, and controlled Lanczos enlargement.
+          - Uses Core Image acceleration on iPhone and a bounded native Android restoration pass without a desktop CUDA dependency.
           - Preserves original audio and the existing encoder-safe output behavior.
+
+          ### Branded launch
+
+          - Bundles the supplied 3.809-second voice and 2.617-second SFX.
+          - Voice starts immediately, SFX starts at 1.0 second, and the app opens at 3.0 seconds while the voice finishes naturally.
+          - AniScale logo zooms in and fades into the main interface.
 
           ### Premium monochrome interface
 
           - New black-and-white command bar matching the supplied visual direction.
           - Functional Video, Image, Upscale, Ask AI, attachment, send, model, controls, and navigation actions.
-          - White selected states, dark elevated pills, tighter spacing, and restrained motion replace the previous purple-blue treatment.
+          - Touch-positioned specular highlights now move under the user's finger across glass surfaces on Android and iOS.
+          - Assistant header, API-key field, conversation bubbles, attachment control, and composer use the same premium glass language.
 
           ### AniUltraScale developer foundation
 

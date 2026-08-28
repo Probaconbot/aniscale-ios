@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   testWidgets('AniScale home screen renders', (tester) async {
-    await tester.pumpWidget(const AniScaleApp());
+    await tester.pumpWidget(const AniScaleApp(showIntro: false));
 
     expect(find.text('AniScale'), findsOneWidget);
     expect(find.text('Create a cleaner frame.'), findsOneWidget);
@@ -13,5 +13,16 @@ void main() {
     expect(find.text('Upscale'), findsOneWidget);
     expect(find.text('Ask AI'), findsOneWidget);
     expect(find.text('Choose image'), findsOneWidget);
+  });
+
+  testWidgets('branded launch transitions to the app at three seconds', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const AniScaleApp());
+
+    expect(find.text('Welcome to AniScale'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Create a cleaner frame.'), findsOneWidget);
   });
 }

@@ -10,7 +10,7 @@ decoded frame
   -> scanline/pattern suppression
   -> chroma/noise cleanup
   -> controlled local contrast
-  -> AniScale Fusion
+  -> controlled Lanczos enlargement
   -> video encode + original-audio remux
 ```
 
@@ -25,3 +25,7 @@ TFLite, or ncnn:
 They are suitable teacher/reference models for a later temporally aware mobile
 student. A trained student must be benchmarked on patterned footage and real
 devices before replacing the deterministic cleanup stage.
+
+The deterministic stage intentionally bypasses Fusion. Frame-generative SR can
+interpret residual display lines as texture and strengthen them, which is the
+opposite of the cleanup mode's purpose.

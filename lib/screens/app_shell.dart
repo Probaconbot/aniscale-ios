@@ -376,7 +376,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                   _VideoEngine.fusion => 'AniScale Fusion — tuned for anime and stylized 3D with strong, faithful detail.',
                   _VideoEngine.render => 'AniScale Render — a heavier 23-block model for clean 3D surfaces, sharper geometry, and restrained noise.',
                   _VideoEngine.turbo => 'AniScale Turbo — a compact video model for faster processing and lower heat.',
-                  _VideoEngine.clean => 'AniScale Clean — corrects green cast, scanlines, moiré, chroma noise, blur, and compression before Fusion upscaling.',
+                  _VideoEngine.clean => 'AniScale Clean — removes green cast, scanlines, moiré, chroma noise, blur, and compression without generative detail amplification.',
                   _VideoEngine.ultra => 'AniUltraScale Experimental — the real temporal VSR architecture with untrained weights. Noisy or corrupted output is expected.',
                 },
                 textAlign: TextAlign.center,
@@ -429,7 +429,11 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                     _VideoEngine.ultra => 'AniUltraScale — Experimental',
                   }),
                   subtitle: Text(
-                    '${_engine == _VideoEngine.ultra ? (Platform.isIOS ? 'Core ML experimental VSR' : 'ONNX Runtime experimental VSR') : (Platform.isIOS ? 'Core Image + Core ML' : 'Android cleanup + ncnn Vulkan')} processes locally. Original audio is preserved and oversized results fit a safe 4K output.',
+                    '${switch (_engine) {
+                      _VideoEngine.ultra => Platform.isIOS ? 'Core ML experimental VSR' : 'ONNX Runtime experimental VSR',
+                      _VideoEngine.clean => Platform.isIOS ? 'Core Image restoration + Lanczos' : 'Native restoration + Lanczos',
+                      _ => Platform.isIOS ? 'Core ML' : 'ncnn Vulkan',
+                    }} processes locally. Original audio is preserved and oversized results fit a safe 4K output.',
                   ),
                 ),
               ),
@@ -1935,27 +1939,56 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('AI Assistant', style: Theme.of(context).textTheme.displaySmall),
-          const SizedBox(height: 7),
-          const Text(
-            'Describe the result. AniScale turns it into an engine recipe.',
+          Row(
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(
+                  Icons.auto_awesome_rounded,
+                  color: Colors.black,
+                ),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Text(
+                  'AI Assistant',
+                  style: Theme.of(context).textTheme.displaySmall,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 18),
-          TextField(
-            controller: _keyController,
-            obscureText: !_showKey,
-            autocorrect: false,
-            enableSuggestions: false,
-            decoration: InputDecoration(
-              labelText: 'Groq API key',
-              hintText: 'Paste a new key',
-              helperText: 'Kept in memory only until AniScale closes.',
-              suffixIcon: IconButton(
-                onPressed: () => setState(() => _showKey = !_showKey),
-                icon: Icon(
-                  _showKey
-                      ? Icons.visibility_off_outlined
-                      : Icons.visibility_outlined,
+          const SizedBox(height: 10),
+          const Text(
+            'Attach an image and describe the restoration. AniScale turns it into a precise local-engine recipe.',
+          ),
+          const SizedBox(height: 16),
+          LiquidGlassSurface(
+            borderRadius: 22,
+            padding: const EdgeInsets.fromLTRB(14, 4, 8, 4),
+            child: TextField(
+              controller: _keyController,
+              obscureText: !_showKey,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: InputDecoration(
+                labelText: 'Groq API key · memory only',
+                hintText: 'Paste your key',
+                filled: false,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                suffixIcon: IconButton(
+                  onPressed: () => setState(() => _showKey = !_showKey),
+                  icon: Icon(
+                    _showKey
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                  ),
                 ),
               ),
             ),
@@ -2016,26 +2049,33 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
                     separatorBuilder: (_, _) => const SizedBox(height: 10),
                     itemBuilder: (_, index) {
                       final message = _messages[index];
+                      final bubble = Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Text(
+                          message.text,
+                          style: TextStyle(
+                            color: message.user ? Colors.black : Colors.white,
+                          ),
+                        ),
+                      );
                       return Align(
                         alignment: message.user
                             ? Alignment.centerRight
                             : Alignment.centerLeft,
-                        child: Container(
+                        child: ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 330),
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: message.user
-                                ? Colors.white
-                                : AniColors.deepNavy,
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(color: AniColors.border),
-                          ),
-                          child: Text(
-                            message.text,
-                            style: TextStyle(
-                              color: message.user ? Colors.black : Colors.white,
-                            ),
-                          ),
+                          child: message.user
+                              ? DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(22),
+                                  ),
+                                  child: bubble,
+                                )
+                              : LiquidGlassSurface(
+                                  borderRadius: 22,
+                                  child: bubble,
+                                ),
                         ),
                       );
                     },
@@ -2050,42 +2090,55 @@ class _GroqAssistantScreenState extends State<GroqAssistantScreen> {
             ),
           ],
           const SizedBox(height: 12),
-          Row(
-            children: [
-              IconButton.outlined(
-                onPressed: _sending ? null : _pickImage,
-                tooltip: 'Attach image',
-                icon: const Icon(Icons.add_photo_alternate_outlined),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextField(
-                  controller: _promptController,
-                  minLines: 1,
-                  maxLines: 3,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => _send(),
-                  decoration: const InputDecoration(
-                    hintText: 'Describe the cleanup you want…',
+          LiquidGlassSurface(
+            borderRadius: 30,
+            padding: const EdgeInsets.all(6),
+            tint: const Color(0xF0141518),
+            child: Row(
+              children: [
+                IconButton.filledTonal(
+                  onPressed: _sending ? null : _pickImage,
+                  tooltip: 'Attach image',
+                  style: IconButton.styleFrom(
+                    backgroundColor: const Color(0xFF242529),
+                    foregroundColor: Colors.white,
+                  ),
+                  icon: const Icon(Icons.add_rounded),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: TextField(
+                    controller: _promptController,
+                    minLines: 1,
+                    maxLines: 3,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => _send(),
+                    decoration: const InputDecoration(
+                      hintText: '@Describe, restore, or ask AI…',
+                      filled: false,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              IconButton.filled(
-                onPressed: _sending ? null : _send,
-                style: IconButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.black,
-                  minimumSize: const Size(52, 52),
+                const SizedBox(width: 6),
+                IconButton.filled(
+                  onPressed: _sending ? null : _send,
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.black,
+                    minimumSize: const Size(50, 50),
+                  ),
+                  icon: _sending
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.arrow_upward_rounded),
                 ),
-                icon: _sending
-                    ? const SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.arrow_upward_rounded),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -2361,7 +2414,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           Text('Turbo — compact native 2×/4× processing.'),
                           SizedBox(height: 8),
                           Text(
-                            'Clean — pattern, color-cast, noise, blur, and compression restoration before Fusion.',
+                            'Clean — non-generative pattern, color-cast, noise, blur, and compression restoration.',
                           ),
                           SizedBox(height: 8),
                           Text(
@@ -2454,7 +2507,7 @@ class GlassCard extends StatelessWidget {
 }
 
 /// A route-safe material surface rendered inside Flutter's scene.
-class LiquidGlassSurface extends StatelessWidget {
+class LiquidGlassSurface extends StatefulWidget {
   const LiquidGlassSurface({
     super.key,
     required this.child,
@@ -2471,67 +2524,130 @@ class LiquidGlassSurface extends StatelessWidget {
   final double blur;
 
   @override
+  State<LiquidGlassSurface> createState() => _LiquidGlassSurfaceState();
+}
+
+class _LiquidGlassSurfaceState extends State<LiquidGlassSurface> {
+  Offset _touch = Offset.zero;
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
-    final radius = BorderRadius.circular(borderRadius);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: radius,
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x38000000),
-            blurRadius: 30,
-            offset: Offset(0, 14),
-          ),
-          BoxShadow(color: Color(0x14FFFFFF), blurRadius: 20, spreadRadius: -8),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: radius,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: _GlassBackdrop(tint: tint, blur: blur),
-            ),
-            Container(
-              padding: padding,
-              decoration: BoxDecoration(
-                borderRadius: radius,
-                border: Border.all(color: const Color(0x3DFFFFFF)),
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0x1CFFFFFF), Color(0x05000000)],
+    final radius = BorderRadius.circular(widget.borderRadius);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : 320.0;
+        final height = constraints.maxHeight.isFinite
+            ? constraints.maxHeight
+            : 80.0;
+        final touchAlignment = Alignment(
+          ((_touch.dx / width) * 2 - 1).clamp(-1, 1),
+          ((_touch.dy / height) * 2 - 1).clamp(-1, 1),
+        );
+        return Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: (event) => setState(() {
+            _touch = event.localPosition;
+            _pressed = true;
+          }),
+          onPointerMove: (event) =>
+              setState(() => _touch = event.localPosition),
+          onPointerUp: (_) => setState(() => _pressed = false),
+          onPointerCancel: (_) => setState(() => _pressed = false),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: radius,
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x4A000000),
+                  blurRadius: 30,
+                  offset: Offset(0, 14),
                 ),
-              ),
+                BoxShadow(
+                  color: Color(0x14FFFFFF),
+                  blurRadius: 20,
+                  spreadRadius: -8,
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: radius,
               child: Stack(
                 children: [
-                  Positioned(
-                    left: 12,
-                    right: 12,
-                    top: 0,
-                    child: IgnorePointer(
-                      child: Container(
-                        height: 1,
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [
-                              Colors.transparent,
-                              Color(0xC2FFFFFF),
-                              Colors.transparent,
-                            ],
+                  Positioned.fill(
+                    child: _GlassBackdrop(tint: widget.tint, blur: widget.blur),
+                  ),
+                  Container(
+                    padding: widget.padding,
+                    decoration: BoxDecoration(
+                      borderRadius: radius,
+                      border: Border.all(color: const Color(0x42FFFFFF)),
+                      gradient: const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          Color(0x24FFFFFF),
+                          Color(0x0BFFFFFF),
+                          Color(0x08000000),
+                        ],
+                      ),
+                    ),
+                    child: Stack(
+                      children: [
+                        Positioned(
+                          left: 12,
+                          right: 12,
+                          top: 0,
+                          child: IgnorePointer(
+                            child: Container(
+                              height: 1,
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    Colors.transparent,
+                                    Color(0xD8FFFFFF),
+                                    Colors.transparent,
+                                  ],
+                                ),
+                                borderRadius: BorderRadius.circular(1),
+                              ),
+                            ),
                           ),
-                          borderRadius: BorderRadius.circular(1),
+                        ),
+                        widget.child,
+                      ],
+                    ),
+                  ),
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: AnimatedOpacity(
+                        opacity: _pressed ? 1 : 0,
+                        duration: const Duration(milliseconds: 100),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: RadialGradient(
+                              center: touchAlignment,
+                              radius: .85,
+                              colors: const [
+                                Color(0x32FFFFFF),
+                                Color(0x0CFFFFFF),
+                                Colors.transparent,
+                              ],
+                              stops: const [0, .34, 1],
+                            ),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                  child,
                 ],
               ),
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

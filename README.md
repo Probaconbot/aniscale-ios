@@ -38,12 +38,19 @@ resolutions while preserving an encoder-safe full export size. Fusion, Render, a
 selectable for Android image upscaling.
 
 AniScale Clean is a separate video restoration pipeline for green casts, scanlines, moiré-like
-patterning, chroma noise, blur, and compression damage. It runs a bounded native cleanup pass before
-Fusion, using Core Image on iOS and an optimized bitmap pass on Android. The desktop
+patterning, chroma noise, blur, and compression damage. It runs bounded native cleanup followed by
+controlled Lanczos enlargement, using Core Image on iOS and an optimized bitmap pass on Android.
+Damaged footage is deliberately not passed into a generative SR model because that can amplify
+residual stripes into false detail. The desktop
 [VideoDemoireing](https://github.com/CVMI-Lab/VideoDemoireing) and
 [BasicVSR++](https://github.com/ckkelvinchan/BasicVSR_PlusPlus) implementations are documented as
 future training teachers; their CUDA/MMCV/custom-operator checkpoints are not falsely presented as
 mobile models.
+
+App launch includes the supplied 3.809-second voice and 2.617-second SFX: voice begins immediately,
+SFX begins at 1.0 second, the logo zooms/fades, and the main interface opens at 3.0 seconds while the
+voice finishes naturally. Liquid Glass surfaces use platform compositing and a touch-positioned
+specular highlight on Android and iOS; no embedded HTML view is required.
 
 ## Video model training
 
