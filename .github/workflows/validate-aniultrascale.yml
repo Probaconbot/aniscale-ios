@@ -1,0 +1,40 @@
+name: Validate AniUltraScale
+
+on:
+  push:
+    paths:
+      - "training/**"
+      - ".github/workflows/validate-aniultrascale.yml"
+      - "README.md"
+      - "THIRD_PARTY_NOTICES.md"
+  pull_request:
+    paths:
+      - "training/**"
+      - ".github/workflows/validate-aniultrascale.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: training/requirements.txt
+      - name: Compile training tools and validate configs
+        run: |
+          python -m compileall -q training
+          python training/validate_assets.py
+      - name: Install CPU PyTorch for architecture smoke test
+        run: >-
+          python -m pip install
+          --index-url https://download.pytorch.org/whl/cpu
+          torch==2.5.1
+      - name: Exercise temporal inference and deploy fusion
+        run: python training/smoke_test_aniultrascale.py
+

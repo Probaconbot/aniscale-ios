@@ -1,0 +1,34 @@
+{
+  "name": "AniUltraScale QUALITY",
+  "architecture": "aniultrascale-recurrent-v1",
+  "scale": 2,
+  "sequence_length": 5,
+  "hr_patch_size": 384,
+  "batch_size": 3,
+  "gradient_accumulation": 4,
+  "iterations": 260000,
+  "learning_rate": 0.0001,
+  "ema_decay": 0.9995,
+  "model": {
+    "channels": 48,
+    "temporal_blocks": 10,
+    "reconstruction_blocks": 5
+  },
+  "loss": {
+    "charbonnier": 1.0,
+    "edge": 0.15,
+    "frequency": 0.12,
+    "temporal": 0.28,
+    "fidelity": 0.20,
+    "detail": 0.10,
+    "perceptual": 0.06
+  },
+  "deployment": {
+    "frames": 5,
+    "input_height": 270,
+    "input_width": 480,
+    "precision": "float16",
+    "minimum_ios": 15,
+    "android_backend": "ncnn-vulkan"
+  }
+}

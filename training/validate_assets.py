@@ -21,6 +21,31 @@ def main() -> None:
         raise RuntimeError("FAST and QUALITY must retain the SRVGG and RRDB model family")
     if any(int(config["scale"]) != 4 for config in configs):
         raise RuntimeError("AniScale deployment checkpoints must remain native 4x")
+    ultra_configs = [
+        json.loads((ROOT / "configs" / name).read_text(encoding="utf-8"))
+        for name in ("aniultrascale_fast.json", "aniultrascale_quality.json")
+    ]
+    if {config["name"] for config in ultra_configs} != {
+        "AniUltraScale FAST",
+        "AniUltraScale QUALITY",
+    }:
+        raise RuntimeError("AniUltraScale FAST and QUALITY configs are both required")
+    for config in ultra_configs:
+        if config["architecture"] != "aniultrascale-recurrent-v1":
+            raise RuntimeError("AniUltraScale must use its temporal architecture")
+        if int(config["scale"]) != 2 or int(config["sequence_length"]) != 5:
+            raise RuntimeError("AniUltraScale v1 must use native 2x five-frame clips")
+        loss = dict(config["loss"])
+        for required in (
+            "charbonnier",
+            "edge",
+            "frequency",
+            "temporal",
+            "fidelity",
+            "detail",
+        ):
+            if float(loss.get(required, 0)) <= 0:
+                raise RuntimeError(f"AniUltraScale is missing its {required} loss")
     reference = json.loads(
         (ROOT / "references" / "acceptance.json").read_text(encoding="utf-8")
     )
@@ -33,9 +58,8 @@ def main() -> None:
     width, height = struct.unpack(">II", data[16:24])
     if (width, height) != (int(reference["width"]), int(reference["height"])):
         raise RuntimeError("Acceptance reference dimensions do not match its manifest")
-    print("AniScale training configs and acceptance reference are valid")
+    print("AniScale and AniUltraScale configs plus the acceptance reference are valid")
 
 
 if __name__ == "__main__":
     main()
-

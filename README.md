@@ -36,14 +36,21 @@ supported, performs frame-to-YUV conversion in native code, and chooses engine-s
 resolutions while preserving an encoder-safe full export size. Fusion, Render, and Turbo are also
 selectable for Android image upscaling.
 
-## Video model fine-tuning
+## Video model training
 
-The reproducible [training pipeline](training/README.md) retains AniScale's existing Real-ESRGAN
+The reproducible [existing-model fine-tuning pipeline](training/README.md) retains AniScale's existing Real-ESRGAN
 RRDB and AnimeVideo-v3 SRVGG architectures. It includes real multi-generation codec degradation,
 paired sequence loading, motion-aligned temporal loss, FAST/QUALITY configurations, perceptual and
 temporal checkpoint evaluation, Core ML FP16 export, the supplied visual acceptance reference, and
 a physical-iPhone benchmark schema. Fine-tuned weights and benchmark numbers are not claimed until
 training data, a CUDA run, and an Instruments trace on an actual iPhone have completed.
+
+[AniUltraScale](training/ANIULTRASCALE.md) is the next, separate video engine: a native 2x,
+five-frame recurrent VSR model with forward/backward temporal propagation and independent fidelity
+and detail residual controls. FAST and QUALITY configurations, real-video degradation, temporal,
+frequency, and edge losses, and guarded Core ML/ONNX export are versioned in the repository.
+AniUltraScale is not listed as a released engine until trained weights and physical Android/iPhone
+benchmarks pass the documented release gate.
 
 ## Run
 

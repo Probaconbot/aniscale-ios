@@ -32,6 +32,8 @@ def clip_seed(global_seed: int, path: Path) -> int:
 
 
 def degradation(rng: random.Random) -> dict[str, object]:
+    exposure_start = rng.uniform(-0.035, 0.035)
+    saturation_start = rng.uniform(0.92, 1.08)
     return {
         "codec_generations": rng.choice([1, 1, 2, 2, 3]),
         "bitrate_kbps": rng.choice([180, 260, 350, 500, 700, 900, 1200]),
@@ -41,6 +43,12 @@ def degradation(rng: random.Random) -> dict[str, object]:
         "motion_mix": rng.random() < 0.4,
         "social_media": rng.random() < 0.5,
         "codec": rng.choice(["libx264", "libx264", "libx265"]),
+        # Real capture parameters drift gradually rather than jumping to an
+        # unrelated random value on every frame.
+        "exposure_start": round(exposure_start, 4),
+        "exposure_end": round(exposure_start + rng.uniform(-0.025, 0.025), 4),
+        "saturation_start": round(saturation_start, 4),
+        "saturation_end": round(saturation_start + rng.uniform(-0.06, 0.06), 4),
     }
 
 
@@ -103,7 +111,7 @@ def prepare_clip(
     work.mkdir(parents=True)
 
     # HR dimensions are rounded to a multiple of 2*scale; LQ is therefore an
-    # exact integer 4x pair and also encoder-safe yuv420p.
+    # exact integer scale pair and also encoder-safe yuv420p.
     hr_scale = (
         f"scale=trunc(iw/{scale * 2})*{scale * 2}:"
         f"trunc(ih/{scale * 2})*{scale * 2}:flags=lanczos"
@@ -132,6 +140,16 @@ def prepare_clip(
         f"scale=trunc(iw/{scale * 2})*2:trunc(ih/{scale * 2})*2:flags=lanczos",
         f"gblur=sigma={settings['blur_sigma']}",
     ]
+    exposure_start = float(settings["exposure_start"])
+    exposure_delta = float(settings["exposure_end"]) - exposure_start
+    saturation_start = float(settings["saturation_start"])
+    saturation_delta = float(settings["saturation_end"]) - saturation_start
+    filters.append(
+        "eq="
+        f"brightness='{exposure_start:.5f}+({exposure_delta:.5f})*t/{seconds:.5f}':"
+        f"saturation='{saturation_start:.5f}+({saturation_delta:.5f})*t/{seconds:.5f}':"
+        "eval=frame"
+    )
     if bool(settings["motion_mix"]):
         filters.append("tmix=frames=3:weights='1 2 1'")
     if int(settings["noise_strength"]) > 0:
@@ -199,7 +217,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--scale", type=int, default=4, choices=[4])
+    parser.add_argument("--scale", type=int, default=2, choices=[2, 4])
     parser.add_argument("--fps", type=float, default=24.0)
     parser.add_argument("--clip-seconds", type=float, default=12.0)
     parser.add_argument("--validation-percent", type=int, default=10)
@@ -237,4 +255,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
