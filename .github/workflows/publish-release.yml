@@ -112,6 +112,8 @@ jobs:
         run: |
           TAG="v${VERSION}"
           if gh release view "$TAG" >/dev/null 2>&1; then
+            git tag --force "$TAG" "${GITHUB_SHA}"
+            git push origin "refs/tags/$TAG" --force
             gh release edit "$TAG" --title "AniScale ${TAG}" --notes-file release-notes.md
             gh release upload "$TAG" \
               "dist/AniScale-Android-v${VERSION}.apk" \
