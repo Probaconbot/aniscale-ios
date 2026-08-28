@@ -58,9 +58,18 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           cat > release-notes.md <<EOF
-          ## AniScale ${VERSION} — faster Android AI and working history
+          ## AniScale ${VERSION} — mobile fixes and AniUltraScale foundation
 
-          This release fixes Android model-memory failures, reduces processing overhead, sharpens video output, and makes image and video history persistent and reopenable.
+          This release fixes Android model-memory failures, reduces processing overhead, sharpens the existing video pipeline, and makes image and video history persistent and reopenable. It also publishes the reproducible AniUltraScale temporal-video training foundation for developers.
+
+          ### AniUltraScale developer foundation
+
+          - Native 2×, five-frame recurrent video-super-resolution architecture with forward and backward temporal propagation.
+          - Separate fidelity and detail residual controls, with FAST and QUALITY training configurations.
+          - Crisp-detail objectives using edge, frequency, local-contrast, and multi-scale Laplacian losses rather than targeting the softer Real-ESRGAN appearance.
+          - Temporal supervision to reduce flicker and keep recovered detail stable between frames.
+          - Licence-audited training-media acquisition, real-video degradation, guarded export, and validation tooling.
+          - **Status:** training source is included, but AniUltraScale is not exposed as a production app engine until trained weights and physical-device benchmarks pass the documented release gate.
 
           ### Video engines
 
@@ -90,7 +99,7 @@ jobs:
 
           ### Privacy
 
-          Image and video enhancement runs on the device. Media is not uploaded for processing.
+          The released app's image and video enhancement runs on the device. Media is not uploaded for processing.
 
           SHA-256 checksums are included in `SHA256SUMS.txt`.
           EOF
