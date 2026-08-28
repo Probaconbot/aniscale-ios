@@ -10,6 +10,9 @@ import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
 import android.os.Build
+import ai.onnxruntime.OnnxTensor
+import ai.onnxruntime.OrtEnvironment
+import ai.onnxruntime.OrtSession
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -18,6 +21,7 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
+import java.nio.FloatBuffer
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
@@ -59,6 +63,16 @@ class MainActivity : FlutterActivity() {
     private val cancelled = AtomicBoolean(false)
     private var progressSink: EventChannel.EventSink? = null
     @Volatile private var initialized = false
+    private val ultraEnvironment by lazy { OrtEnvironment.getEnvironment() }
+    private val ultraSession by lazy {
+        val options = OrtSession.SessionOptions().apply {
+            setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+        }
+        val model = assets.open("models/AniUltraScale_experimental_2x.onnx").use {
+            it.readBytes()
+        }
+        ultraEnvironment.createSession(model, options)
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -170,7 +184,7 @@ class MainActivity : FlutterActivity() {
                     "originalHeight" to originalHeight,
                     "outputWidth" to enhanced.width,
                     "outputHeight" to enhanced.height,
-                    "engine" to "${engineLabel(engine)} (${backendLabel()})",
+                    "engine" to "${engineLabel(engine)} (${backendLabel(engine)})",
                 )
                 enhanced.recycle()
                 emitProgress(1.0)
@@ -190,14 +204,18 @@ class MainActivity : FlutterActivity() {
         val tileSize = call.argument<Int>("tileSize") ?: 192
         val engine = call.argument<String>("engine") ?: "fusion"
         if (path.isNullOrBlank() || scale !in listOf(2, 4) ||
-            engine !in listOf("fusion", "render", "turbo")) {
+            engine !in listOf("fusion", "render", "turbo", "ultra")) {
             result.error("bad_arguments", "Invalid video request.", null)
             return
         }
         cancelled.set(false)
         worker.execute {
             try {
-                ensureModels()
+                if (engine == "ultra") {
+                    ultraSession
+                } else {
+                    ensureModels()
+                }
                 val response = processVideo(path, scale, efficient, tileSize, engine)
                 runOnUiThread { result.success(response) }
             } catch (error: Throwable) {
@@ -238,6 +256,7 @@ class MainActivity : FlutterActivity() {
         val maxInputEdge = if (!nativeUsesVulkan()) {
             if (engine == "turbo") 480 else 384
         } else when (engine) {
+            "ultra" -> 320
             "turbo" -> if (efficient) 720 else 960
             "render" -> if (efficient) 640 else 896
             else -> if (efficient) 768 else 960
@@ -307,14 +326,17 @@ class MainActivity : FlutterActivity() {
                     "turbo" -> 0.22f
                     else -> 0.28f
                 }
-                val enhanced = nativeUpscale(
-                    rgba,
-                    engine,
-                    scale,
-                    tileSize,
-                    modelSharpness,
-                )
-                    ?: error("The selected AniScale model failed on frame ${frameIndex + 1}.")
+                val enhanced = if (engine == "ultra") {
+                    upscaleUltraExperimental(rgba)
+                } else {
+                    nativeUpscale(
+                        rgba,
+                        engine,
+                        scale,
+                        tileSize,
+                        modelSharpness,
+                    )
+                } ?: error("The selected AniScale model failed on frame ${frameIndex + 1}.")
                 rgba.recycle()
                 val outputFrame = if (
                     enhanced.width == outputWidth && enhanced.height == outputHeight
@@ -359,7 +381,7 @@ class MainActivity : FlutterActivity() {
             "outputWidth" to outputWidth,
             "outputHeight" to outputHeight,
             "durationSeconds" to durationMs / 1000.0,
-            "engine" to "${engineLabel(engine)} (${backendLabel()})",
+            "engine" to "${engineLabel(engine)} (${backendLabel(engine)})",
         )
     }
 
@@ -367,7 +389,9 @@ class MainActivity : FlutterActivity() {
         check(exists() || mkdirs()) { "AniScale could not create its local history folder." }
     }
 
-    private fun backendLabel(): String = if (nativeUsesVulkan()) {
+    private fun backendLabel(engine: String? = null): String = if (engine == "ultra") {
+        "ONNX Runtime — untrained"
+    } else if (nativeUsesVulkan()) {
         "Android ncnn Vulkan FP16"
     } else {
         "Android ncnn CPU"
@@ -376,7 +400,65 @@ class MainActivity : FlutterActivity() {
     private fun engineLabel(engine: String): String = when (engine) {
         "render" -> "AniScale Render"
         "turbo" -> "AniScale Turbo"
+        "ultra" -> "AniUltraScale Experimental"
         else -> "AniScale Fusion"
+    }
+
+    private fun upscaleUltraExperimental(bitmap: Bitmap): Bitmap {
+        val width = 320
+        val height = 180
+        val outputWidth = width * 2
+        val outputHeight = height * 2
+        val source = Bitmap.createScaledBitmap(bitmap, width, height, true)
+        val pixels = IntArray(width * height)
+        source.getPixels(pixels, 0, width, 0, 0, width, height)
+        if (source !== bitmap) source.recycle()
+        val plane = width * height
+        val input = FloatArray(5 * 3 * plane)
+        for (frame in 0 until 5) {
+            val frameOffset = frame * 3 * plane
+            for (index in pixels.indices) {
+                val pixel = pixels[index]
+                input[frameOffset + index] = ((pixel shr 16) and 0xff) / 255f
+                input[frameOffset + plane + index] = ((pixel shr 8) and 0xff) / 255f
+                input[frameOffset + 2 * plane + index] = (pixel and 0xff) / 255f
+            }
+        }
+        OnnxTensor.createTensor(
+            ultraEnvironment,
+            FloatBuffer.wrap(input),
+            longArrayOf(1, 5, 3, height.toLong(), width.toLong()),
+        ).use { framesTensor ->
+            OnnxTensor.createTensor(
+                ultraEnvironment,
+                FloatBuffer.wrap(floatArrayOf(1f, 0.82f)),
+                longArrayOf(1, 2),
+            ).use { controlsTensor ->
+                ultraSession.run(
+                    mapOf("frames" to framesTensor, "controls" to controlsTensor),
+                ).use { result ->
+                    @Suppress("UNCHECKED_CAST")
+                    val output = result[0].value as Array<Array<Array<FloatArray>>>
+                    val channels = output[0]
+                    val outputPixels = IntArray(outputWidth * outputHeight)
+                    for (y in 0 until outputHeight) {
+                        for (x in 0 until outputWidth) {
+                            val red = (channels[0][y][x].coerceIn(0f, 1f) * 255).roundToInt()
+                            val green = (channels[1][y][x].coerceIn(0f, 1f) * 255).roundToInt()
+                            val blue = (channels[2][y][x].coerceIn(0f, 1f) * 255).roundToInt()
+                            outputPixels[y * outputWidth + x] =
+                                (0xff shl 24) or (red shl 16) or (green shl 8) or blue
+                        }
+                    }
+                    return Bitmap.createBitmap(
+                        outputPixels,
+                        outputWidth,
+                        outputHeight,
+                        Bitmap.Config.ARGB_8888,
+                    )
+                }
+            }
+        }
     }
 
     private fun fitOutput(width: Int, height: Int, scale: Int): Pair<Int, Int> {

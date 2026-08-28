@@ -10,7 +10,7 @@ on:
       version:
         description: Release version without the v prefix
         required: true
-        default: 1.9.0
+        default: 1.10.0
         type: string
 
 permissions:
@@ -70,6 +70,13 @@ jobs:
           - Temporal supervision to reduce flicker and keep recovered detail stable between frames.
           - Licence-audited training-media acquisition, real-video degradation, guarded export, and validation tooling.
           - **Status:** training source is included, but AniUltraScale is not exposed as a production app engine until trained weights and physical-device benchmarks pass the documented release gate.
+
+          ### AniUltraScale Experimental
+
+          - A separate, explicitly untrained AniUltraScale runtime is selectable for video architecture testing.
+          - It uses deterministic random initialization and is labelled Experimental throughout the app.
+          - Noisy, corrupted, or unusable output is expected; this is not the trained production checkpoint.
+          - The normal Fusion, Render, and Turbo engines remain available for usable output.
 
           ### Video engines
 

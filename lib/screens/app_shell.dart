@@ -282,7 +282,7 @@ class VideoSelectedScreen extends StatefulWidget {
   State<VideoSelectedScreen> createState() => _VideoSelectedScreenState();
 }
 
-enum _VideoEngine { fusion, render, turbo }
+enum _VideoEngine { fusion, render, turbo, ultra }
 
 class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
   int _scale = 2;
@@ -365,7 +365,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
               const ControlLabel('VIDEO ENGINE'),
               const SizedBox(height: 9),
               SegmentedGlass(
-                labels: const ['Fusion', 'Render', 'Turbo'],
+                labels: const ['Fusion', 'Render', 'Turbo', 'Ultra'],
                 selected: _engine.index,
                 onSelected: (index) =>
                     setState(() => _engine = _VideoEngine.values[index]),
@@ -376,6 +376,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                   _VideoEngine.fusion => 'AniScale Fusion — tuned for anime and stylized 3D with strong, faithful detail.',
                   _VideoEngine.render => 'AniScale Render — a heavier 23-block model for clean 3D surfaces, sharper geometry, and restrained noise.',
                   _VideoEngine.turbo => 'AniScale Turbo — a compact video model for faster processing and lower heat.',
+                  _VideoEngine.ultra => 'AniUltraScale Experimental — the real temporal VSR architecture with untrained weights. Noisy or corrupted output is expected.',
                 },
                 textAlign: TextAlign.center,
                 style: const TextStyle(
@@ -423,9 +424,10 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                     _VideoEngine.fusion => 'AniScale Fusion — Anime & 3D',
                     _VideoEngine.render => 'AniScale Render — 3D',
                     _VideoEngine.turbo => 'AniScale Turbo — Fast',
+                    _VideoEngine.ultra => 'AniUltraScale — Experimental',
                   }),
                   subtitle: Text(
-                    '${Platform.isIOS ? 'Core ML' : 'ncnn Vulkan'} processes every frame locally. Original audio is preserved and oversized results fit a safe 4K output.',
+                    '${_engine == _VideoEngine.ultra ? (Platform.isIOS ? 'Core ML experimental VSR' : 'ONNX Runtime experimental VSR') : (Platform.isIOS ? 'Core ML' : 'ncnn Vulkan')} processes locally. Original audio is preserved and oversized results fit a safe 4K output.',
                   ),
                 ),
               ),
@@ -1027,6 +1029,8 @@ class _EditorScreenState extends State<EditorScreen> {
                   _VideoEngine.render => 'Photos, CGI, and rendered textures with restrained cleanup.',
                   _VideoEngine.turbo =>
                     'Compact 2×/4× model for the fastest, coolest result.',
+                  _VideoEngine.ultra =>
+                    'Video-only experimental engine; choose another engine for images.',
                 },
                 textAlign: TextAlign.center,
                 style: const TextStyle(
@@ -2327,9 +2331,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 icon: Icons.memory_rounded,
                 title: 'Upscale engine',
                 value: Platform.isIOS
-                    ? 'Fusion + Render + Turbo'
+                    ? 'Fusion + Render + Turbo + AniUltraScale Experimental'
                     : Platform.isAndroid
-                    ? 'Fusion + Render + Turbo (ncnn)'
+                    ? 'Fusion + Render + Turbo + AniUltraScale Experimental'
                     : 'Mobile resampler',
                 onTap: () => showModalBottomSheet<void>(
                   context: context,
@@ -2353,6 +2357,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           Text('Render — photos, CGI, and rendered textures.'),
                           SizedBox(height: 8),
                           Text('Turbo — compact native 2×/4× processing.'),
+                          SizedBox(height: 8),
+                          Text('AniUltraScale — untrained temporal VSR experiment; noisy output expected.'),
                         ],
                       ),
                     ),

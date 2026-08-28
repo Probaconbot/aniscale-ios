@@ -97,6 +97,11 @@ fidelity-head supervision, detail-residual supervision, and perceptual structure
 
 The exporter refuses random or architecture-only weights. A checkpoint must carry the trainer's `trained` marker and the SHA-256 fingerprint of its dataset manifest.
 
+The separate `export_aniultrascale_experimental.py` tool is the only exception. It creates a
+deterministically initialized architecture-test model whose metadata always says `trained=false`.
+The app labels that runtime **AniUltraScale Experimental**, and noisy or corrupted output is
+expected. It must never be promoted or renamed as the production checkpoint.
+
 ```bash
 python training/export_aniultrascale.py \
   --checkpoint training/runs/aniultrascale-fast/best.pth \

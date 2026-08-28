@@ -34,6 +34,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
   private lazy var fusionModel = loadModel(named: "RealESRGAN_anime_6B_266_fp16")
   private lazy var renderModel = loadModel(named: "RealESRGAN_render_x4plus_266_fp16")
   private lazy var turboModel = loadModel(named: "AniScale_turbo_animevideo_266_fp16")
+  private lazy var ultraModel = loadModel(named: "AniUltraScale_experimental_2x")
 
   func register(with messenger: FlutterBinaryMessenger) {
     let methods = FlutterMethodChannel(name: Self.methodChannelName, binaryMessenger: messenger)
@@ -103,7 +104,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         }
         let efficient = arguments["efficient"] as? Bool ?? true
         let engine = arguments["engine"] as? String ?? "fusion"
-        guard engine == "fusion" || engine == "render" || engine == "turbo" else {
+        guard engine == "fusion" || engine == "render" || engine == "turbo" || engine == "ultra" else {
           result(FlutterError(code: "bad_arguments", message: "Unknown video engine.", details: nil))
           return
         }
@@ -405,7 +406,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     let selectedModel = engine == "render" ? renderModel : (engine == "turbo" ? turboModel : fusionModel)
     let engineLabel = engine == "render"
       ? "AniScale Render"
-      : (engine == "turbo" ? "AniScale Turbo" : "AniScale Fusion")
+      : (engine == "turbo" ? "AniScale Turbo" : (engine == "ultra" ? "AniUltraScale Experimental" : "AniScale Fusion"))
     let videoDenoise = engine == "render" ? 0.34 : (engine == "turbo" ? 0.16 : 0.2)
     let videoSharpness = engine == "render" ? 0.34 : (engine == "turbo" ? 0.2 : 0.26)
     let videoDetail = engine == "render" ? 0.68 : (engine == "turbo" ? 0.48 : 0.6)
@@ -538,31 +539,39 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         }
         let frameWidth = Int(frame.extent.width.rounded())
         let aiScale = outputWidth >= frameWidth * 3 ? 4 : 2
-        let enhanced = try upscale(
-          image: UIImage(cgImage: frameImage),
-          requestedScale: aiScale,
-          preserveTransparency: false,
-          denoise: videoDenoise,
-          sharpness: videoSharpness,
-          detail: videoDetail,
-          tileSize: tileSize,
-          inferenceModel: selectedModel,
-          engineLabel: engineLabel,
-          encodeOutput: false,
-          tileProgress: { [weak self] tile in
-            self?.emitProgress(min(0.92, frameStart + tile * frameStep))
+        let enhancedImage: CGImage
+        if engine == "ultra" {
+          let inferenceStarted = ProcessInfo.processInfo.systemUptime
+          enhancedImage = try upscaleUltraExperimental(UIImage(cgImage: frameImage))
+          tileInferenceMilliseconds.append(
+            (ProcessInfo.processInfo.systemUptime - inferenceStarted) * 1_000
+          )
+          emitProgress(min(0.92, frameStart + frameStep))
+        } else {
+          let enhanced = try upscale(
+            image: UIImage(cgImage: frameImage),
+            requestedScale: aiScale,
+            preserveTransparency: false,
+            denoise: videoDenoise,
+            sharpness: videoSharpness,
+            detail: videoDetail,
+            tileSize: tileSize,
+            inferenceModel: selectedModel,
+            engineLabel: engineLabel,
+            encodeOutput: false,
+            tileProgress: { [weak self] tile in
+              self?.emitProgress(min(0.92, frameStart + tile * frameStep))
+            }
+          )
+          if let frameInference = enhanced["tileInferenceMilliseconds"] as? [Double] {
+            tileInferenceMilliseconds.append(contentsOf: frameInference)
           }
-        )
-        if let frameInference = enhanced["tileInferenceMilliseconds"] as? [Double] {
-          tileInferenceMilliseconds.append(contentsOf: frameInference)
+          guard let enhancedValue = enhanced["cgImage"] else {
+            throw EngineError("video_frame_encode", "The AI engine returned no enhanced frame.")
+          }
+          enhancedImage = enhancedValue as! CGImage
         }
         processedFrames += 1
-        guard let enhancedValue = enhanced["cgImage"] else {
-          throw EngineError("video_frame_encode", "The AI engine returned no enhanced frame.")
-        }
-        // Core Foundation objects cannot be conditionally downcast reliably in
-        // Swift 6. This value is created by the internal upscale path above.
-        let enhancedImage = enhancedValue as! CGImage
         var enhancedFrame = CIImage(cgImage: enhancedImage)
         let fitScale = min(
           CGFloat(outputWidth) / enhancedFrame.extent.width,
@@ -632,6 +641,81 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         ? "\(engineLabel) (Efficient Core ML)"
         : "\(engineLabel) (Maximum Core ML)"
     ]
+  }
+
+  private func upscaleUltraExperimental(_ image: UIImage) throws -> CGImage {
+    let inputWidth = 320
+    let inputHeight = 180
+    let outputWidth = inputWidth * 2
+    let outputHeight = inputHeight * 2
+    let format = UIGraphicsImageRendererFormat.default()
+    format.scale = 1
+    format.opaque = true
+    let resized = UIGraphicsImageRenderer(
+      size: CGSize(width: inputWidth, height: inputHeight),
+      format: format
+    ).image { _ in
+      image.draw(in: CGRect(x: 0, y: 0, width: inputWidth, height: inputHeight))
+    }
+    guard let source = normalizedRGBA(resized) else {
+      throw EngineError("ultra_decode", "AniUltraScale could not prepare this frame.")
+    }
+    let frames = try MLMultiArray(
+      shape: [1, 5, 3, NSNumber(value: inputHeight), NSNumber(value: inputWidth)],
+      dataType: .float32
+    )
+    let pointer = frames.dataPointer.bindMemory(
+      to: Float32.self,
+      capacity: 5 * 3 * inputWidth * inputHeight
+    )
+    let plane = inputWidth * inputHeight
+    for frame in 0..<5 {
+      let frameOffset = frame * 3 * plane
+      for index in 0..<plane {
+        let pixel = index * 4
+        pointer[frameOffset + index] = Float32(source.pixels[pixel]) / 255
+        pointer[frameOffset + plane + index] = Float32(source.pixels[pixel + 1]) / 255
+        pointer[frameOffset + 2 * plane + index] = Float32(source.pixels[pixel + 2]) / 255
+      }
+    }
+    let controls = try MLMultiArray(shape: [1, 2], dataType: .float32)
+    let controlPointer = controls.dataPointer.bindMemory(to: Float32.self, capacity: 2)
+    controlPointer[0] = 1
+    controlPointer[1] = 0.82
+    let provider = try MLDictionaryFeatureProvider(
+      dictionary: ["frames": frames, "controls": controls]
+    )
+    let prediction = try ultraModel.prediction(from: provider)
+    guard
+      let output = prediction.featureValue(for: "output")?.multiArrayValue,
+      output.dataType == .float32,
+      output.shape.map({ $0.intValue }) == [1, 3, outputHeight, outputWidth]
+    else {
+      throw EngineError("ultra_output", "AniUltraScale returned an invalid tensor.")
+    }
+    let outputPointer = output.dataPointer.bindMemory(
+      to: Float32.self,
+      capacity: 3 * outputWidth * outputHeight
+    )
+    var pixels = [UInt8](repeating: 255, count: outputWidth * outputHeight * 4)
+    let outputPlane = outputWidth * outputHeight
+    for index in 0..<outputPlane {
+      pixels[index * 4] = byte(outputPointer[index])
+      pixels[index * 4 + 1] = byte(outputPointer[outputPlane + index])
+      pixels[index * 4 + 2] = byte(outputPointer[2 * outputPlane + index])
+    }
+    guard let context = CGContext(
+      data: &pixels,
+      width: outputWidth,
+      height: outputHeight,
+      bitsPerComponent: 8,
+      bytesPerRow: outputWidth * 4,
+      space: CGColorSpaceCreateDeviceRGB(),
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ), let result = context.makeImage() else {
+      throw EngineError("ultra_encode", "AniUltraScale could not assemble its frame.")
+    }
+    return result
   }
 
   private func percentile(_ values: [Double], _ fraction: Double) -> Double {

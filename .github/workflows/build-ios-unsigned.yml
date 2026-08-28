@@ -69,6 +69,35 @@ jobs:
           test -f ios/Runner/Models/RealESRGAN_render_x4plus_266_fp16.mlpackage/Manifest.json
           test -f ios/Runner/Models/AniScale_turbo_animevideo_266_fp16.mlpackage/Manifest.json
 
+      - name: Restore AniUltraScale experimental runtime
+        id: ultra-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios/Runner/Models/AniUltraScale_experimental_2x.mlpackage
+            android/app/src/main/assets/models/AniUltraScale_experimental_2x.onnx
+          key: aniultrascale-untrained-v2-${{ hashFiles('training/aniultrascale_model.py', 'training/export_aniultrascale_experimental.py', 'training/configs/aniultrascale_fast.json') }}
+
+      - name: Export explicitly untrained AniUltraScale runtime
+        if: steps.ultra-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "numpy<2" "torch==2.5.1" "coremltools==8.1" "onnx==1.17.0"
+          mkdir -p build/aniultra ios/Runner/Models android/app/src/main/assets/models
+          python training/export_aniultrascale_experimental.py \
+            --output build/aniultra --onnx --coreml
+          cp build/aniultra/AniUltraScale_experimental_2x.onnx \
+            android/app/src/main/assets/models/
+          cp -R build/aniultra/AniUltraScale_experimental_2x.mlpackage \
+            ios/Runner/Models/
+
+      - name: Verify AniUltraScale experimental assets
+        shell: bash
+        run: |
+          test -f ios/Runner/Models/AniUltraScale_experimental_2x.mlpackage/Manifest.json
+          test -f android/app/src/main/assets/models/AniUltraScale_experimental_2x.onnx
+
       - name: Analyze project
         shell: bash
         run: flutter analyze

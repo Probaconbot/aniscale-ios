@@ -51,8 +51,10 @@ gated neighboring-frame interaction, forward/backward recurrent propagation, and
 PiSA-style fidelity/detail residual controls. FAST and QUALITY configurations, real-video
 degradation, cleaning, temporal, frequency, and edge losses, and guarded Core ML/ONNX export are
 versioned in the repository.
-AniUltraScale is not listed as a released engine until trained weights and physical Android/iPhone
-benchmarks pass the documented release gate.
+AniUltraScale Experimental can be selected for architecture testing with deterministic, explicitly
+untrained weights. Its output may be noisy or unusable and it is not the production checkpoint.
+AniUltraScale will not be labelled production-ready until trained weights and physical
+Android/iPhone benchmarks pass the documented release gate.
 
 ## Run
 
