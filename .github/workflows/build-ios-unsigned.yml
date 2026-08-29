@@ -229,7 +229,7 @@ jobs:
           flutter build ios --release --no-codesign 2>&1 | tee "$RUNNER_TEMP/ios-build.log"
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
-            grep -E "(^|[[:space:]])error:|Swift Compiler Error" "$RUNNER_TEMP/ios-build.log" | tail -n 12 | while IFS= read -r line; do
+            grep -Ei "error|failed|CDAEngine|OnnxRuntime" "$RUNNER_TEMP/ios-build.log" | tail -n 16 | while IFS= read -r line; do
               message=$(printf '%s' "$line" | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
               echo "::error title=iOS build failed::$message"
             done
