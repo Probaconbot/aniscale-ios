@@ -136,6 +136,9 @@ jobs:
         if: steps.cda-vsr-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
+          set -o pipefail
+          exec > >(tee "$RUNNER_TEMP/cda-convert.log") 2>&1
+          trap 'status=$?; if [ "$status" -ne 0 ]; then message=$(grep -Ev "^[[:space:]]*$" "$RUNNER_TEMP/cda-convert.log" | tail -n 1 | sed "s/%/%25/g; s/\r/%0D/g; s/\n/%0A/g"); echo "::error title=CDA-VSR conversion failed::$message"; fi' EXIT
           python -m pip install --upgrade pip
           git clone https://github.com/ajccarlson/flux-fidelity.git "$RUNNER_TEMP/flux-fidelity"
           git -C "$RUNNER_TEMP/flux-fidelity" checkout 03acb0f8f8e0f1c8219a8ab0e842a0efcc74b18c
