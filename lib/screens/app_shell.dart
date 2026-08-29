@@ -282,12 +282,16 @@ class VideoSelectedScreen extends StatefulWidget {
   State<VideoSelectedScreen> createState() => _VideoSelectedScreenState();
 }
 
-enum _VideoEngine { fusion, render, turbo, clean, ultra }
+enum _VideoEngine { fusion, render, turbo, clean, ultra, superUltra }
 
 class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
   int _scale = 2;
+  double _targetScale = 2;
   late int _performance;
   _VideoEngine _engine = _VideoEngine.fusion;
+  int _content = 0;
+  int _detailMode = 0;
+  int _codec = 0;
 
   @override
   void initState() {
@@ -299,6 +303,14 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
   Widget build(BuildContext context) {
     final file = File(widget.inputPath);
     final filename = widget.inputPath.split(Platform.pathSeparator).last;
+    final engines = Platform.isAndroid || Platform.isIOS
+        ? _VideoEngine.values
+        : _VideoEngine.values
+              .where((engine) => engine != _VideoEngine.superUltra)
+              .toList();
+    final selectedEngineIndex = engines
+        .indexOf(_engine)
+        .clamp(0, engines.length - 1);
     return Scaffold(
       appBar: const GlassAppBar(title: 'Video'),
       body: AmbientBackground(
@@ -365,10 +377,25 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
               const ControlLabel('VIDEO ENGINE'),
               const SizedBox(height: 9),
               SegmentedGlass(
-                labels: const ['Fusion', 'Render', 'Turbo', 'Clean', 'Ultra'],
-                selected: _engine.index,
-                onSelected: (index) =>
-                    setState(() => _engine = _VideoEngine.values[index]),
+                labels: engines
+                    .map(
+                      (engine) => switch (engine) {
+                        _VideoEngine.fusion => 'Fusion',
+                        _VideoEngine.render => 'Render',
+                        _VideoEngine.turbo => 'Turbo',
+                        _VideoEngine.clean => 'Clean',
+                        _VideoEngine.ultra => 'Ultra',
+                        _VideoEngine.superUltra => 'Super',
+                      },
+                    )
+                    .toList(),
+                selected: selectedEngineIndex,
+                onSelected: (index) => setState(() {
+                  _engine = engines[index];
+                  if (_engine == _VideoEngine.superUltra) {
+                    _scale = _targetScale <= 2 ? 2 : 4;
+                  }
+                }),
               ),
               const SizedBox(height: 8),
               Text(
@@ -378,6 +405,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                   _VideoEngine.turbo => 'AniScale Turbo — a compact video model for faster processing and lower heat.',
                   _VideoEngine.clean => 'AniScale Clean — removes green cast, scanlines, moiré, chroma noise, blur, and compression without generative detail amplification.',
                   _VideoEngine.ultra => 'AniUltraScale Experimental — the real temporal VSR architecture with untrained weights. Noisy or corrupted output is expected.',
+                  _VideoEngine.superUltra => 'SuperUltra — offline SPAN restoration with native mobile acceleration and no temporary frame files.',
                 },
                 textAlign: TextAlign.center,
                 style: const TextStyle(
@@ -386,14 +414,55 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                 ),
               ),
               const SizedBox(height: 18),
-              const ControlLabel('VIDEO UPSCALE'),
+              ControlLabel(
+                _engine == _VideoEngine.superUltra
+                    ? 'SUPERULTRA SCALE'
+                    : 'VIDEO UPSCALE',
+              ),
               const SizedBox(height: 9),
               SegmentedGlass(
-                labels: const ['2×', '4×'],
-                selected: _scale == 2 ? 0 : 1,
-                onSelected: (index) =>
-                    setState(() => _scale = index == 0 ? 2 : 4),
+                labels: _engine == _VideoEngine.superUltra
+                    ? const ['1.5×', '2×', '3×', '4×']
+                    : const ['2×', '4×'],
+                selected: _engine == _VideoEngine.superUltra
+                    ? const [1.5, 2.0, 3.0, 4.0].indexOf(_targetScale)
+                    : (_scale == 2 ? 0 : 1),
+                onSelected: (index) => setState(() {
+                  if (_engine == _VideoEngine.superUltra) {
+                    _targetScale = const [1.5, 2.0, 3.0, 4.0][index];
+                    _scale = _targetScale <= 2 ? 2 : 4;
+                  } else {
+                    _scale = index == 0 ? 2 : 4;
+                    _targetScale = _scale.toDouble();
+                  }
+                }),
               ),
+              if (_engine == _VideoEngine.superUltra) ...[
+                const SizedBox(height: 18),
+                const ControlLabel('CONTENT'),
+                const SizedBox(height: 9),
+                SegmentedGlass(
+                  labels: const ['Auto', 'Live Action', 'Anime'],
+                  selected: _content,
+                  onSelected: (index) => setState(() => _content = index),
+                ),
+                const SizedBox(height: 18),
+                const ControlLabel('DETAIL'),
+                const SizedBox(height: 9),
+                SegmentedGlass(
+                  labels: const ['Natural', 'Detailed', 'Sharp'],
+                  selected: _detailMode,
+                  onSelected: (index) => setState(() => _detailMode = index),
+                ),
+                const SizedBox(height: 18),
+                const ControlLabel('CODEC'),
+                const SizedBox(height: 9),
+                SegmentedGlass(
+                  labels: const ['HEVC', 'H.264'],
+                  selected: _codec,
+                  onSelected: (index) => setState(() => _codec = index),
+                ),
+              ],
               const SizedBox(height: 18),
               const ControlLabel('AI PERFORMANCE'),
               const SizedBox(height: 9),
@@ -427,10 +496,12 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                     _VideoEngine.turbo => 'AniScale Turbo — Fast',
                     _VideoEngine.clean => 'AniScale Clean — Restore',
                     _VideoEngine.ultra => 'AniUltraScale — Experimental',
+                    _VideoEngine.superUltra => 'SuperUltra — Offline SPAN',
                   }),
                   subtitle: Text(
                     '${switch (_engine) {
                       _VideoEngine.ultra => Platform.isIOS ? 'Core ML experimental VSR' : 'ONNX Runtime experimental VSR',
+                      _VideoEngine.superUltra => Platform.isIOS ? 'Core ML/Metal FP16' : 'ncnn Vulkan FP16',
                       _VideoEngine.clean => Platform.isIOS ? 'Core Image restoration + Lanczos' : 'Native restoration + Lanczos',
                       _ => Platform.isIOS ? 'Core ML' : 'ncnn Vulkan',
                     }} processes locally. Original audio is preserved and oversized results fit a safe 4K output.',
@@ -456,9 +527,19 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                   builder: (_) => VideoProcessingScreen(
                     inputPath: widget.inputPath,
                     scale: _scale,
+                    targetScale: _engine == _VideoEngine.superUltra
+                        ? _targetScale
+                        : _scale.toDouble(),
                     efficient: _performance == 0,
                     tileSize: widget.settings.engineTileSize,
                     engine: _engine.name,
+                    content: const ['auto', 'live', 'anime'][_content],
+                    detailMode: const [
+                      'natural',
+                      'detailed',
+                      'sharp',
+                    ][_detailMode],
+                    codec: _codec == 0 ? 'hevc' : 'h264',
                     onEnhanced: widget.onEnhanced,
                   ),
                 ),
@@ -474,17 +555,25 @@ class VideoProcessingScreen extends StatefulWidget {
     super.key,
     required this.inputPath,
     required this.scale,
+    required this.targetScale,
     required this.efficient,
     required this.tileSize,
     required this.engine,
+    required this.content,
+    required this.detailMode,
+    required this.codec,
     required this.onEnhanced,
   });
 
   final String inputPath;
   final int scale;
+  final double targetScale;
   final bool efficient;
   final int tileSize;
   final String engine;
+  final String content;
+  final String detailMode;
+  final String codec;
   final ValueChanged<Enhancement> onEnhanced;
 
   @override
@@ -512,16 +601,20 @@ class _VideoProcessingScreenState extends State<VideoProcessingScreen> {
       final result = await upscaleVideoLocally(
         path: widget.inputPath,
         scale: widget.scale,
+        targetScale: widget.targetScale,
         efficient: widget.efficient,
         tileSize: widget.tileSize,
         engine: widget.engine,
+        content: widget.content,
+        detailMode: widget.detailMode,
+        codec: widget.codec,
       );
       if (!mounted || _cancelled) return;
       widget.onEnhanced(
         Enhancement(
           originalPath: widget.inputPath,
           outputPath: result.path,
-          scale: widget.scale,
+          scale: widget.targetScale.round(),
           createdAt: DateTime.now(),
           originalWidth: result.originalWidth,
           originalHeight: result.originalHeight,
@@ -1037,6 +1130,7 @@ class _EditorScreenState extends State<EditorScreen> {
                     'Compact 2×/4× model for the fastest, coolest result.',
                   _VideoEngine.clean => 'Video-only patterned-footage cleanup; choose another engine for images.',
                   _VideoEngine.ultra => 'Video-only experimental engine; choose another engine for images.',
+                  _VideoEngine.superUltra => 'Video-only offline SPAN engine; choose another engine for images.',
                 },
                 textAlign: TextAlign.center,
                 style: const TextStyle(
@@ -2386,9 +2480,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 icon: Icons.memory_rounded,
                 title: 'Upscale engine',
                 value: Platform.isIOS
-                    ? 'Fusion + Render + Turbo + AniUltraScale Experimental'
+                    ? 'Fusion + Render + Turbo + SuperUltra + AniUltraScale Experimental'
                     : Platform.isAndroid
-                    ? 'Fusion + Render + Turbo + AniUltraScale Experimental'
+                    ? 'Fusion + Render + Turbo + SuperUltra + AniUltraScale Experimental'
                     : 'Mobile resampler',
                 onTap: () => showModalBottomSheet<void>(
                   context: context,
@@ -2412,6 +2506,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           Text('Render — photos, CGI, and rendered textures.'),
                           SizedBox(height: 8),
                           Text('Turbo — compact native 2×/4× processing.'),
+                          SizedBox(height: 8),
+                          Text(
+                            'SuperUltra — offline SPAN 1.5×/2×/3×/4× video restoration with Live Action and Anime modes.',
+                          ),
                           SizedBox(height: 8),
                           Text(
                             'Clean — non-generative pattern, color-cast, noise, blur, and compression restoration.',

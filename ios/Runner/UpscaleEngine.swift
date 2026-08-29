@@ -35,6 +35,9 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
   private lazy var renderModel = loadModel(named: "RealESRGAN_render_x4plus_266_fp16")
   private lazy var turboModel = loadModel(named: "AniScale_turbo_animevideo_266_fp16")
   private lazy var ultraModel = loadModel(named: "AniUltraScale_experimental_2x")
+  private lazy var superUltra2xModel = loadModel(named: "SuperUltra_span_x2_fp16")
+  private lazy var superUltra4xModel = loadModel(named: "SuperUltra_span_x4_fp16")
+  private lazy var superUltraAnime2xModel = loadModel(named: "SuperUltra_span_anime_x2_fp16")
 
   func register(with messenger: FlutterBinaryMessenger) {
     let methods = FlutterMethodChannel(name: Self.methodChannelName, binaryMessenger: messenger)
@@ -104,7 +107,15 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         }
         let efficient = arguments["efficient"] as? Bool ?? true
         let engine = arguments["engine"] as? String ?? "fusion"
-        guard engine == "fusion" || engine == "render" || engine == "turbo" || engine == "clean" || engine == "ultra" else {
+        let targetScale = (arguments["targetScale"] as? NSNumber)?.doubleValue ?? Double(scale)
+        let content = arguments["content"] as? String ?? "auto"
+        let detailMode = arguments["detailMode"] as? String ?? "natural"
+        let codec = arguments["codec"] as? String ?? "hevc"
+        guard engine == "fusion" || engine == "render" || engine == "turbo" || engine == "clean" || engine == "ultra" || engine == "superUltra",
+              [1.5, 2.0, 3.0, 4.0].contains(targetScale),
+              ["auto", "live", "anime"].contains(content),
+              ["natural", "detailed", "sharp"].contains(detailMode),
+              ["hevc", "h264"].contains(codec) else {
           result(FlutterError(code: "bad_arguments", message: "Unknown video engine.", details: nil))
           return
         }
@@ -116,9 +127,13 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
             let response = try self.upscaleVideo(
               path: path,
               scale: scale,
+              targetScale: targetScale,
               efficient: efficient,
               tileSize: tileSize,
-              engine: engine
+              engine: engine,
+              content: content,
+              detailMode: detailMode,
+              codec: codec
             )
             DispatchQueue.main.async { result(response) }
           } catch let error as EngineError {
@@ -206,6 +221,8 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     metadata: CFDictionary? = nil,
     inferenceModel: MLModel? = nil,
     engineLabel: String = "AniScale Fusion",
+    modelInputSize: Int = 266,
+    modelOutputScale: Int = 4,
     encodeOutput: Bool = true,
     tileProgress: ((Double) -> Void)?
   ) throws -> [String: Any] {
@@ -251,7 +268,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     let totalTiles = xStarts.count * yStarts.count
     var output = [UInt8](repeating: 0, count: outputWidth * outputHeight * 4)
     let inputArray = try MLMultiArray(
-      shape: [1, 3, NSNumber(value: modelSize), NSNumber(value: modelSize)],
+      shape: [1, 3, NSNumber(value: modelInputSize), NSNumber(value: modelInputSize)],
       dataType: .float32
     )
     var completed = 0
@@ -271,7 +288,8 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           y0: y0,
           tileWidth: tileWidth,
           tileHeight: tileHeight,
-          denoise: denoise
+          denoise: denoise,
+          modelInputSize: modelInputSize
         )
         let provider = try MLDictionaryFeatureProvider(dictionary: ["input": inputArray])
         let inferenceStarted = ProcessInfo.processInfo.systemUptime
@@ -289,8 +307,8 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           values.dataType == .float32,
           values.shape.count == 4,
           values.shape[1].intValue == 3,
-          values.shape[2].intValue == modelSize * nativeScale,
-          values.shape[3].intValue == modelSize * nativeScale
+          values.shape[2].intValue == modelInputSize * modelOutputScale,
+          values.shape[3].intValue == modelInputSize * modelOutputScale
         else {
           throw EngineError("invalid_model", "The AI model returned an unexpected tensor layout.")
         }
@@ -308,6 +326,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           into: &output,
           outputWidth: outputWidth,
           requestedScale: requestedScale,
+          modelOutputScale: modelOutputScale,
           tileX: x0,
           tileY: y0,
           coreX0: coreX0,
@@ -395,21 +414,36 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
   private func upscaleVideo(
     path: String,
     scale: Int,
+    targetScale: Double,
     efficient: Bool,
     tileSize: Int,
-    engine: String
+    engine: String,
+    content: String,
+    detailMode: String,
+    codec: String
   ) throws -> [String: Any] {
     let benchmarkStarted = ProcessInfo.processInfo.systemUptime
     let initialThermalState = thermalStateLabel()
     var tileInferenceMilliseconds: [Double] = []
     var processedFrames = 0
-    let selectedModel = engine == "render" ? renderModel : (engine == "turbo" ? turboModel : fusionModel)
+    let superUltraNativeScale = targetScale <= 2 ? 2 : 4
+    let selectedModel = engine == "superUltra"
+      ? (superUltraNativeScale == 2
+        ? (content == "anime" ? superUltraAnime2xModel : superUltra2xModel)
+        : superUltra4xModel)
+      : (engine == "render" ? renderModel : (engine == "turbo" ? turboModel : fusionModel))
     let engineLabel = engine == "render"
       ? "AniScale Render"
-      : (engine == "turbo" ? "AniScale Turbo" : (engine == "clean" ? "AniScale Clean" : (engine == "ultra" ? "AniUltraScale Experimental" : "AniScale Fusion")))
-    let videoDenoise = engine == "render" ? 0.34 : (engine == "clean" ? 0.30 : (engine == "turbo" ? 0.16 : 0.2))
-    let videoSharpness = engine == "render" ? 0.34 : (engine == "clean" ? 0.24 : (engine == "turbo" ? 0.2 : 0.26))
-    let videoDetail = engine == "render" ? 0.68 : (engine == "clean" ? 0.56 : (engine == "turbo" ? 0.48 : 0.6))
+      : (engine == "turbo" ? "AniScale Turbo" : (engine == "clean" ? "AniScale Clean" : (engine == "ultra" ? "AniUltraScale Experimental" : (engine == "superUltra" ? "SuperUltra" : "AniScale Fusion"))))
+    let videoDenoise = engine == "superUltra"
+      ? (content == "anime" ? 0.08 : 0.04)
+      : (engine == "render" ? 0.34 : (engine == "clean" ? 0.30 : (engine == "turbo" ? 0.16 : 0.2)))
+    let videoSharpness = engine == "superUltra"
+      ? (detailMode == "sharp" ? 0.55 : (detailMode == "detailed" ? 0.28 : 0.0))
+      : (engine == "render" ? 0.34 : (engine == "clean" ? 0.24 : (engine == "turbo" ? 0.2 : 0.26)))
+    let videoDetail = engine == "superUltra"
+      ? (detailMode == "sharp" ? 0.82 : (detailMode == "detailed" ? 0.68 : 0.52))
+      : (engine == "render" ? 0.68 : (engine == "clean" ? 0.56 : (engine == "turbo" ? 0.48 : 0.6)))
     let sourceURL = URL(fileURLWithPath: path)
     let asset = AVAsset(url: sourceURL)
     guard let videoTrack = asset.tracks(withMediaType: .video).first else {
@@ -420,8 +454,8 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       .applying(videoTrack.preferredTransform)
     let sourceWidth = Int(abs(transformedRect.width).rounded())
     let sourceHeight = Int(abs(transformedRect.height).rounded())
-    let requestedWidth = sourceWidth * scale
-    let requestedHeight = sourceHeight * scale
+    let requestedWidth = Int((Double(sourceWidth) * targetScale).rounded())
+    let requestedHeight = Int((Double(sourceHeight) * targetScale).rounded())
     // iPhone hardware encoders generally top out around 4K. Keep 4× as a
     // usable enhancement mode by automatically fitting oversized results into
     // the largest safe 4K canvas instead of rejecting the video outright.
@@ -452,16 +486,22 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     let finalURL = FileManager.default.temporaryDirectory
       .appendingPathComponent("aniscale_video_\(UUID().uuidString).mp4")
     let writer = try AVAssetWriter(outputURL: silentURL, fileType: .mp4)
-    let bitrate = min(40_000_000, max(4_000_000, outputWidth * outputHeight * 4))
+    let outputCodec: AVVideoCodecType = codec == "hevc" ? .hevc : .h264
+    let frameRate = max(1, Int(videoTrack.nominalFrameRate.rounded()))
+    let bitsPerPixel = outputCodec == .hevc ? 0.11 : 0.18
+    let bitrate = min(
+      60_000_000,
+      max(4_000_000, Int(Double(outputWidth * outputHeight * frameRate) * bitsPerPixel))
+    )
     let writerInput = AVAssetWriterInput(
       mediaType: .video,
       outputSettings: [
-        AVVideoCodecKey: AVVideoCodecType.h264,
+        AVVideoCodecKey: outputCodec,
         AVVideoWidthKey: outputWidth,
         AVVideoHeightKey: outputHeight,
         AVVideoCompressionPropertiesKey: [
           AVVideoAverageBitRateKey: bitrate,
-          AVVideoExpectedSourceFrameRateKey: max(1, Int(videoTrack.nominalFrameRate.rounded()))
+          AVVideoExpectedSourceFrameRateKey: frameRate
         ]
       ]
     )
@@ -541,7 +581,9 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           )
         }
         let frameWidth = Int(frame.extent.width.rounded())
-        let aiScale = outputWidth >= frameWidth * 3 ? 4 : 2
+        let aiScale = engine == "superUltra"
+          ? superUltraNativeScale
+          : (outputWidth >= frameWidth * 3 ? 4 : 2)
         let enhancedImage: CGImage
         if engine == "ultra" {
           let inferenceStarted = ProcessInfo.processInfo.systemUptime
@@ -567,6 +609,8 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
             tileSize: tileSize,
             inferenceModel: selectedModel,
             engineLabel: engineLabel,
+            modelInputSize: engine == "superUltra" ? 256 : modelSize,
+            modelOutputScale: engine == "superUltra" ? superUltraNativeScale : nativeScale,
             encodeOutput: false,
             tileProgress: { [weak self] tile in
               self?.emitProgress(min(0.92, frameStart + tile * frameStep))
@@ -603,6 +647,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         throw EngineError("video_encode_failed", writer.error?.localizedDescription ?? "A video frame could not be encoded.")
       }
       emitProgress(min(0.92, max(0.01, CMTimeGetSeconds(timestamp) / durationSeconds * 0.92)))
+      throttleForThermalState()
     }
 
     writerInput.markAsFinished()
@@ -646,9 +691,11 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         "computeUnits": "Core ML all (CPU/GPU/Neural Engine selected per device)",
         "utilizationNote": "Capture CPU, GPU, Neural Engine, and peak memory with Xcode Instruments on a physical iPhone."
       ],
-      "engine": efficient
-        ? "\(engineLabel) (Efficient Core ML)"
-        : "\(engineLabel) (Maximum Core ML)"
+      "engine": engine == "superUltra"
+        ? "SuperUltra — \(content.capitalized), \(detailMode.capitalized) (Core ML/Metal)"
+        : (efficient
+          ? "\(engineLabel) (Efficient Core ML)"
+          : "\(engineLabel) (Maximum Core ML)")
     ]
   }
 
@@ -779,6 +826,17 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     }
   }
 
+  private func throttleForThermalState() {
+    let delay: TimeInterval
+    switch ProcessInfo.processInfo.thermalState {
+    case .critical: delay = 0.08
+    case .serious: delay = 0.045
+    case .fair: delay = 0.015
+    default: delay = 0
+    }
+    if delay > 0 { Thread.sleep(forTimeInterval: delay) }
+  }
+
   private func preserveAudio(
     from originalAsset: AVAsset,
     processedVideoURL: URL,
@@ -866,16 +924,17 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     y0: Int,
     tileWidth: Int,
     tileHeight: Int,
-    denoise: Double
+    denoise: Double,
+    modelInputSize: Int
   ) {
     let pointer = array.dataPointer.bindMemory(to: Float32.self, capacity: array.count)
     let channelStride = array.strides[1].intValue
     let rowStride = array.strides[2].intValue
     let columnStride = array.strides[3].intValue
     let cleanup = Float32(max(0, min(1, denoise))) * 0.35
-    for localY in 0..<modelSize {
+    for localY in 0..<modelInputSize {
       let sourceY = y0 + reflected(localY, length: tileHeight)
-      for localX in 0..<modelSize {
+      for localX in 0..<modelInputSize {
         let sourceX = x0 + reflected(localX, length: tileWidth)
         let safeX = min(sourceX, sourceWidth - 1)
         let safeY = min(sourceY, sourceHeight - 1)
@@ -912,6 +971,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     into destination: inout [UInt8],
     outputWidth: Int,
     requestedScale: Int,
+    modelOutputScale: Int,
     tileX: Int,
     tileY: Int,
     coreX0: Int,
@@ -926,7 +986,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     detail: Double,
     colorFidelity: Double
   ) {
-    let downsample = nativeScale / requestedScale
+    let downsample = modelOutputScale / requestedScale
     let channelStride = array.strides[1].intValue
     let rowStride = array.strides[2].intValue
     let columnStride = array.strides[3].intValue
@@ -951,8 +1011,8 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       for sourceX in coreX0..<coreX1 {
         for subY in 0..<requestedScale {
           for subX in 0..<requestedScale {
-            let modelX = (sourceX - tileX) * nativeScale + subX * downsample
-            let modelY = (sourceY - tileY) * nativeScale + subY * downsample
+            let modelX = (sourceX - tileX) * modelOutputScale + subX * downsample
+            let modelY = (sourceY - tileY) * modelOutputScale + subY * downsample
             var red: Float32 = 0
             var green: Float32 = 0
             var blue: Float32 = 0

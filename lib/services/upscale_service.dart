@@ -100,9 +100,13 @@ Future<void> cancelUpscale() async {
 Future<VideoUpscaleResult> upscaleVideoLocally({
   required String path,
   required int scale,
+  double? targetScale,
   required bool efficient,
   required int tileSize,
   required String engine,
+  String content = 'auto',
+  String detailMode = 'natural',
+  String codec = 'hevc',
 }) async {
   if (!Platform.isIOS && !Platform.isAndroid) {
     throw UnsupportedError(
@@ -114,9 +118,13 @@ Future<VideoUpscaleResult> upscaleVideoLocally({
     {
       'path': path,
       'scale': scale,
+      'targetScale': targetScale ?? scale.toDouble(),
       'efficient': efficient,
       'tileSize': tileSize,
       'engine': engine,
+      'content': content,
+      'detailMode': detailMode,
+      'codec': codec,
     },
   );
   if (response == null) {
@@ -129,10 +137,10 @@ Future<VideoUpscaleResult> upscaleVideoLocally({
     path: response['path'] as String,
     originalWidth:
         response['originalWidth'] as int? ??
-        (response['outputWidth'] as int) ~/ scale,
+        ((response['outputWidth'] as int) / (targetScale ?? scale)).round(),
     originalHeight:
         response['originalHeight'] as int? ??
-        (response['outputHeight'] as int) ~/ scale,
+        ((response['outputHeight'] as int) / (targetScale ?? scale)).round(),
     outputWidth: response['outputWidth'] as int,
     outputHeight: response['outputHeight'] as int,
     durationSeconds: (response['durationSeconds'] as num).toDouble(),

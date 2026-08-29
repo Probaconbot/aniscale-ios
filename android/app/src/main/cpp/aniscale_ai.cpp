@@ -49,7 +49,23 @@ bool select_net(const std::string& engine, int requested_scale, int& native_scal
     std::string model;
     const char* param = nullptr;
     const char* weights = nullptr;
-    if (engine == "turbo") {
+    if (engine.rfind("superultra", 0) == 0) {
+        native_scale = requested_scale == 2 ? 2 : 4;
+        const bool anime = engine == "superultra_anime" && requested_scale == 2;
+        model = anime
+            ? "superultra_anime2x"
+            : (requested_scale == 2 ? "superultra_live2x" : "superultra_live4x");
+        param = anime
+            ? "models/superultra-anime-x2.param"
+            : (requested_scale == 2
+                ? "models/spanx2_ch48.param"
+                : "models/spanx4_ch48.param");
+        weights = anime
+            ? "models/superultra-anime-x2.bin"
+            : (requested_scale == 2
+                ? "models/spanx2_ch48.bin"
+                : "models/spanx4_ch48.bin");
+    } else if (engine == "turbo") {
         native_scale = requested_scale == 2 ? 2 : 4;
         model = requested_scale == 2 ? "turbo2x" : "turbo4x";
         param = requested_scale == 2
@@ -184,9 +200,18 @@ Java_app_aniscale_aniscale_MainActivity_nativeUpscale(
     const int width = static_cast<int>(info.width);
     const int height = static_cast<int>(info.height);
     int tile_size = static_cast<int>(requested_tile);
-    if (tile_size == 0) tile_size = engine == "turbo" && gpu_ready ? 320 : 256;
-    tile_size = std::clamp(tile_size, 64, engine == "turbo" ? 384 : 256);
-    const int overlap = 10;
+    const bool super_ultra = engine.rfind("superultra", 0) == 0;
+    if (tile_size == 0) {
+        tile_size = super_ultra
+            ? (gpu_ready ? 256 : 128)
+            : (engine == "turbo" && gpu_ready ? 320 : 256);
+    }
+    tile_size = std::clamp(
+        tile_size,
+        64,
+        super_ultra ? (gpu_ready ? 512 : 192) : (engine == "turbo" ? 384 : 256)
+    );
+    const int overlap = super_ultra ? 24 : 10;
     const int output_width = width * requested_scale;
     const int output_height = height * requested_scale;
     jobject output_bitmap = make_bitmap(env, output_width, output_height);

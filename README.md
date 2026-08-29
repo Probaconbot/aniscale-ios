@@ -13,6 +13,8 @@ AniScale is a private, offline-first image and video enhancer for iPhone and And
   patterned/color-damaged footage, the separate heavy
   AniScale Render model for general 3D, and compact AniScale Turbo for lower heat, with progress,
   cancellation, original audio, automatic encoder-safe 4K fitting, and Efficient and Maximum modes
+- SuperUltra offline SPAN video restoration on Android and iOS with 1.5×, 2×, 3×, and 4× output,
+  Auto/Live Action/Anime content modes, Natural/Detailed/Sharp controls, and HEVC/H.264 export
 - Processing, before/after comparison, persistent image/video history, reopen, delete, playback, settings, save, and share flows
 - Local upscaling never uploads media; no account or watermark
 - Optional Groq vision planning: attach an image and describe the result, then review a structured
@@ -36,6 +38,14 @@ muxed into the local result. Android keeps only the selected model resident, use
 supported, performs frame-to-YUV conversion in native code, and chooses engine-specific working
 resolutions while preserving an encoder-safe full export size. Fusion, Render, and Turbo are also
 selectable for Android image upscaling.
+
+SuperUltra is a separate efficient video engine built on SPAN rather than the Real-ESRGAN family.
+Android runs the x2/x4 networks through ncnn Vulkan FP16; iOS runs fixed 256-pixel tile conversions
+through Core ML FP16 with Metal/Neural Engine selection. It includes the official general SPAN x2
+and x4 checkpoints plus the attributed HFA2k SPAN x2 anime checkpoint. Frames are processed in
+memory without writing intermediate PNG files, overlapping tiles suppress seams, only the selected
+model stays resident, and thermal backoff reduces sustained load. The 1.5× and 3× choices use one
+native SPAN pass followed by a controlled high-quality downsample.
 
 AniScale Clean is a separate video restoration pipeline for green casts, scanlines, moiré-like
 patterning, chroma noise, blur, and compression damage. It runs bounded native cleanup followed by

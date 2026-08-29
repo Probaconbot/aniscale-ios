@@ -5,11 +5,13 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
 import android.os.Build
+import android.os.PowerManager
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
@@ -200,11 +202,19 @@ class MainActivity : FlutterActivity() {
     private fun runVideo(call: MethodCall, result: MethodChannel.Result) {
         val path = call.argument<String>("path")
         val scale = call.argument<Int>("scale") ?: 2
+        val targetScale = call.argument<Number>("targetScale")?.toDouble() ?: scale.toDouble()
         val efficient = call.argument<Boolean>("efficient") ?: true
         val tileSize = call.argument<Int>("tileSize") ?: 192
         val engine = call.argument<String>("engine") ?: "fusion"
+        val content = call.argument<String>("content") ?: "auto"
+        val detailMode = call.argument<String>("detailMode") ?: "natural"
+        val codec = call.argument<String>("codec") ?: "hevc"
         if (path.isNullOrBlank() || scale !in listOf(2, 4) ||
-            engine !in listOf("fusion", "render", "turbo", "clean", "ultra")) {
+            targetScale !in listOf(1.5, 2.0, 3.0, 4.0) ||
+            engine !in listOf("fusion", "render", "turbo", "clean", "ultra", "superUltra") ||
+            content !in listOf("auto", "live", "anime") ||
+            detailMode !in listOf("natural", "detailed", "sharp") ||
+            codec !in listOf("hevc", "h264")) {
             result.error("bad_arguments", "Invalid video request.", null)
             return
         }
@@ -216,7 +226,17 @@ class MainActivity : FlutterActivity() {
                     "clean" -> Unit
                     else -> ensureModels()
                 }
-                val response = processVideo(path, scale, efficient, tileSize, engine)
+                val response = processVideo(
+                    path,
+                    scale,
+                    targetScale,
+                    efficient,
+                    tileSize,
+                    engine,
+                    content,
+                    detailMode,
+                    codec,
+                )
                 runOnUiThread { result.success(response) }
             } catch (error: Throwable) {
                 runOnUiThread {
@@ -229,9 +249,13 @@ class MainActivity : FlutterActivity() {
     private fun processVideo(
         path: String,
         scale: Int,
+        targetScale: Double,
         efficient: Boolean,
         tileSize: Int,
         engine: String,
+        content: String,
+        detailMode: String,
+        codec: String,
     ): Map<String, Any> {
         val retriever = MediaMetadataRetriever()
         retriever.setDataSource(path)
@@ -250,13 +274,14 @@ class MainActivity : FlutterActivity() {
             ?: error("The first video frame could not be decoded.")
         val sourceWidth = first.width
         val sourceHeight = first.height
-        val target = fitOutput(sourceWidth, sourceHeight, scale)
+        val target = fitOutput(sourceWidth, sourceHeight, targetScale)
         val outputWidth = target.first
         val outputHeight = target.second
         val maxInputEdge = if (!nativeUsesVulkan()) {
             if (engine == "turbo") 480 else 384
         } else when (engine) {
             "ultra" -> 320
+            "superUltra" -> if (efficient) 720 else 960
             "turbo" -> if (efficient) 720 else 960
             "render" -> if (efficient) 640 else 896
             else -> if (efficient) 768 else 960
@@ -284,8 +309,18 @@ class MainActivity : FlutterActivity() {
             }
         }
 
+        val requestedMime = if (codec == "hevc") {
+            MediaFormat.MIMETYPE_VIDEO_HEVC
+        } else {
+            MediaFormat.MIMETYPE_VIDEO_AVC
+        }
+        val encoderMime = if (hasHardwareEncoder(requestedMime)) {
+            requestedMime
+        } else {
+            MediaFormat.MIMETYPE_VIDEO_AVC
+        }
         val format = MediaFormat.createVideoFormat(
-            MediaFormat.MIMETYPE_VIDEO_AVC,
+            encoderMime,
             outputWidth,
             outputHeight,
         ).apply {
@@ -296,11 +331,19 @@ class MainActivity : FlutterActivity() {
             setInteger(MediaFormat.KEY_FRAME_RATE, fps.roundToInt())
             setInteger(
                 MediaFormat.KEY_BIT_RATE,
-                min(40_000_000, max(4_000_000, outputWidth * outputHeight * 4)),
+                min(
+                    60_000_000,
+                    max(
+                        4_000_000,
+                        (outputWidth * outputHeight * fps *
+                            if (encoderMime == MediaFormat.MIMETYPE_VIDEO_HEVC) 0.11 else 0.18
+                        ).roundToInt(),
+                    ),
+                ),
             )
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
         }
-        val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+        val encoder = MediaCodec.createEncoderByType(encoderMime)
         val muxer = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         val muxState = MuxState()
         try {
@@ -324,6 +367,11 @@ class MainActivity : FlutterActivity() {
                 val rgba = prepared.copy(Bitmap.Config.ARGB_8888, false)
                 prepared.recycle()
                 val modelSharpness = when (engine) {
+                    "superUltra" -> when (detailMode) {
+                        "sharp" -> 0.16f
+                        "detailed" -> 0.08f
+                        else -> 0.0f
+                    }
                     "render" -> 0.18f
                     "turbo" -> 0.22f
                     else -> 0.28f
@@ -336,6 +384,13 @@ class MainActivity : FlutterActivity() {
                         outputWidth,
                         outputHeight,
                         true,
+                    )
+                    "superUltra" -> nativeUpscale(
+                        rgba,
+                        if (content == "anime") "superultra_anime" else "superultra_live",
+                        scale,
+                        tileSize,
+                        modelSharpness,
                     )
                     else -> nativeUpscale(
                         rgba,
@@ -357,6 +412,7 @@ class MainActivity : FlutterActivity() {
                 }
                 queueFrame(encoder, outputFrame, frameIndex, fps, muxer, muxState, audioFormat)
                 outputFrame.recycle()
+                applyThermalBackoff(frameIndex)
                 emitProgress(0.02 + (frameIndex + 1).toDouble() / frameCount * 0.92)
             }
             queueEndOfStream(encoder, frameCount, fps, muxer, muxState, audioFormat)
@@ -389,7 +445,11 @@ class MainActivity : FlutterActivity() {
             "outputWidth" to outputWidth,
             "outputHeight" to outputHeight,
             "durationSeconds" to durationMs / 1000.0,
-            "engine" to "${engineLabel(engine)} (${backendLabel(engine)})",
+            "engine" to if (engine == "superUltra") {
+                "SuperUltra — ${contentLabel(content)}, ${detailMode.replaceFirstChar { it.uppercase() }} (${backendLabel(engine)})"
+            } else {
+                "${engineLabel(engine)} (${backendLabel(engine)})"
+            },
         )
     }
 
@@ -399,6 +459,8 @@ class MainActivity : FlutterActivity() {
 
     private fun backendLabel(engine: String? = null): String = if (engine == "ultra") {
         "ONNX Runtime — untrained"
+    } else if (engine == "superUltra") {
+        if (nativeUsesVulkan()) "SPAN ncnn Vulkan FP16" else "SPAN ncnn CPU"
     } else if (engine == "clean") {
         "Native restoration + Lanczos"
     } else if (nativeUsesVulkan()) {
@@ -412,7 +474,36 @@ class MainActivity : FlutterActivity() {
         "turbo" -> "AniScale Turbo"
         "clean" -> "AniScale Clean"
         "ultra" -> "AniUltraScale Experimental"
+        "superUltra" -> "SuperUltra"
         else -> "AniScale Fusion"
+    }
+
+    private fun contentLabel(content: String): String = when (content) {
+        "anime" -> "Anime"
+        "live" -> "Live Action"
+        else -> "Auto"
+    }
+
+    private fun hasHardwareEncoder(mime: String): Boolean = try {
+        MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.any { info ->
+            info.isEncoder && info.supportedTypes.any { it.equals(mime, ignoreCase = true) } &&
+                !info.name.startsWith("OMX.google", ignoreCase = true) &&
+                !info.name.startsWith("c2.android", ignoreCase = true)
+        }
+    } catch (_: Throwable) {
+        false
+    }
+
+    private fun applyThermalBackoff(frameIndex: Int) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || frameIndex % 6 != 0) return
+        val power = getSystemService(PowerManager::class.java)
+        val pauseMs = when {
+            power.currentThermalStatus >= PowerManager.THERMAL_STATUS_CRITICAL -> 80L
+            power.currentThermalStatus >= PowerManager.THERMAL_STATUS_SEVERE -> 45L
+            power.currentThermalStatus >= PowerManager.THERMAL_STATUS_MODERATE -> 15L
+            else -> 0L
+        }
+        if (pauseMs > 0) Thread.sleep(pauseMs)
     }
 
     /**
@@ -523,7 +614,7 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun fitOutput(width: Int, height: Int, scale: Int): Pair<Int, Int> {
+    private fun fitOutput(width: Int, height: Int, scale: Double): Pair<Int, Int> {
         val requestedWidth = width * scale
         val requestedHeight = height * scale
         val edgeRatio = 3840.0 / max(requestedWidth, requestedHeight)

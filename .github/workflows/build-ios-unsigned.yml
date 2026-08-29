@@ -98,6 +98,45 @@ jobs:
           test -f ios/Runner/Models/AniUltraScale_experimental_2x.mlpackage/Manifest.json
           test -f android/app/src/main/assets/models/AniUltraScale_experimental_2x.onnx
 
+      - name: Restore SuperUltra Core ML models
+        id: superultra-coreml-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios/Runner/Models/SuperUltra_span_x2_fp16.mlpackage
+            ios/Runner/Models/SuperUltra_span_x4_fp16.mlpackage
+            ios/Runner/Models/SuperUltra_span_anime_x2_fp16.mlpackage
+          key: superultra-span-coreml-v1-${{ hashFiles('tools/convert_span_coreml.py') }}
+
+      - name: Convert official SPAN checkpoints for iPhone
+        if: steps.superultra-coreml-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "numpy<2" "torch==2.5.1" "coremltools==8.1" "spandrel==0.4.1"
+          mkdir -p "$RUNNER_TEMP/span-pth" ios/Runner/Models
+          curl -L --fail -o "$RUNNER_TEMP/span-pth/spanx2_ch48.pth" \
+            https://objectstorage.us-phoenix-1.oraclecloud.com/n/ax6ygfvpvzka/b/open-modeldb-files/o/2x-spanx2-ch48.pth
+          curl -L --fail -o "$RUNNER_TEMP/span-pth/spanx4_ch48.pth" \
+            https://objectstorage.us-phoenix-1.oraclecloud.com/n/ax6ygfvpvzka/b/open-modeldb-files/o/4x-spanx4-ch48.pth
+          curl -L --fail -o "$RUNNER_TEMP/span-pth/2xHFA2kSPAN.safetensors" \
+            'https://huggingface.co/Phips/2xHFA2kSPAN/resolve/main/2xHFA2kSPAN.safetensors?download=true'
+          echo "0b20caeea7af5507ec3bdc63ff5a141a28506279d2cfec909c417ecb308d3f93  $RUNNER_TEMP/span-pth/spanx2_ch48.pth" | shasum -a 256 -c -
+          echo "c79e716b8eb24182c1d7fcc74fa10ae074bdb34fee7c6e67c73053ff5498c667  $RUNNER_TEMP/span-pth/spanx4_ch48.pth" | shasum -a 256 -c -
+          echo "616666ffaa9ccdf604e3d6b98bf1ec32c6ed08c4d36da7fed1d013843e5a45e9  $RUNNER_TEMP/span-pth/2xHFA2kSPAN.safetensors" | shasum -a 256 -c -
+          python tools/convert_span_coreml.py \
+            --x2 "$RUNNER_TEMP/span-pth/spanx2_ch48.pth" \
+            --x4 "$RUNNER_TEMP/span-pth/spanx4_ch48.pth" \
+            --anime-x2 "$RUNNER_TEMP/span-pth/2xHFA2kSPAN.safetensors" \
+            --output ios/Runner/Models
+
+      - name: Verify SuperUltra Core ML models
+        shell: bash
+        run: |
+          test -f ios/Runner/Models/SuperUltra_span_x2_fp16.mlpackage/Manifest.json
+          test -f ios/Runner/Models/SuperUltra_span_x4_fp16.mlpackage/Manifest.json
+          test -f ios/Runner/Models/SuperUltra_span_anime_x2_fp16.mlpackage/Manifest.json
+
       - name: Analyze project
         shell: bash
         run: flutter analyze
@@ -135,7 +174,7 @@ jobs:
       - name: Prepare Android ncnn and AniScale models
         shell: bash
         run: |
-          mkdir -p "$RUNNER_TEMP/ncnn" "$RUNNER_TEMP/realesrgan"
+          mkdir -p "$RUNNER_TEMP/ncnn" "$RUNNER_TEMP/realesrgan" "$RUNNER_TEMP/span"
           curl -L --fail -o "$RUNNER_TEMP/ncnn.zip" \
             https://github.com/Tencent/ncnn/releases/download/20260526/ncnn-20260526-android-vulkan.zip
           echo "26909c92eed35afed4a966b5e9e503fcb0a529691ea3f910ec2c94a4fff52804  $RUNNER_TEMP/ncnn.zip" | shasum -a 256 -c -
@@ -157,6 +196,27 @@ jobs:
           cp "$RUNNER_TEMP/realesrgan/models/realesr-animevideov3-x2.bin" android/app/src/main/assets/models/
           cp "$RUNNER_TEMP/realesrgan/models/realesr-animevideov3-x4.param" android/app/src/main/assets/models/
           cp "$RUNNER_TEMP/realesrgan/models/realesr-animevideov3-x4.bin" android/app/src/main/assets/models/
+
+          curl -L --fail -o "$RUNNER_TEMP/span.zip" \
+            https://github.com/TNTwise/SPAN-ncnn-vulkan/releases/download/20240831-055257/span-ncnn-vulkan-20240831-055257-linux.zip
+          echo "d30b7bf59a30cad37202ca097c97043a3669f9a616e3572cc06c7adb98af00ce  $RUNNER_TEMP/span.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/span.zip" -d "$RUNNER_TEMP/span"
+          SPAN_ROOT="$RUNNER_TEMP/span/span-ncnn-vulkan-20240831-055257-linux"
+          cp "$SPAN_ROOT/models/spanx2_ch48.param" android/app/src/main/assets/models/
+          cp "$SPAN_ROOT/models/spanx2_ch48.bin" android/app/src/main/assets/models/
+          cp "$SPAN_ROOT/models/spanx4_ch48.param" android/app/src/main/assets/models/
+          cp "$SPAN_ROOT/models/spanx4_ch48.bin" android/app/src/main/assets/models/
+          cp "$SPAN_ROOT/custom_models/2xHFA2kSPAN_27k.param" \
+            android/app/src/main/assets/models/superultra-anime-x2.param
+          cp "$SPAN_ROOT/custom_models/2xHFA2kSPAN_27k.bin" \
+            android/app/src/main/assets/models/superultra-anime-x2.bin
+
+          test -s android/app/src/main/assets/models/spanx2_ch48.param
+          test -s android/app/src/main/assets/models/spanx2_ch48.bin
+          test -s android/app/src/main/assets/models/spanx4_ch48.param
+          test -s android/app/src/main/assets/models/spanx4_ch48.bin
+          test -s android/app/src/main/assets/models/superultra-anime-x2.param
+          test -s android/app/src/main/assets/models/superultra-anime-x2.bin
 
       - name: Build Android APK
         shell: bash

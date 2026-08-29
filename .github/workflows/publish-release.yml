@@ -10,7 +10,7 @@ on:
       version:
         description: Release version without the v prefix
         required: true
-        default: 1.12.0
+        default: 1.13.0
         type: string
 
 permissions:
@@ -58,9 +58,22 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           cat > release-notes.md <<EOF
-          ## AniScale ${VERSION} — Clean restoration fix, launch audio, and touch glass
+          ## AniScale ${VERSION} — SuperUltra offline SPAN video upscaling
 
-          This release fixes the cleanup regression that could amplify green casts and scanlines, adds a synchronized branded launch sequence, and upgrades the black-and-white interface with touch-reactive Liquid Glass.
+          This release adds SuperUltra as a real offline video engine on Android and iPhone, using SPAN with native mobile acceleration instead of relabelling an existing Real-ESRGAN path.
+
+          ### SuperUltra
+
+          - Official SPAN x2/x4 checkpoints for fast, sharp, local video restoration.
+          - Separate attributed HFA2k SPAN x2 checkpoint for Anime mode.
+          - Auto, Live Action, and Anime content controls.
+          - 1.5×, 2×, 3×, and 4× outputs; 1.5×/3× use a native SPAN pass followed by one high-quality downsample.
+          - Natural, Detailed, and Sharp modes with conservative local detail rather than heavy halo sharpening.
+          - HEVC output with H.264 selection/fallback, encoder-safe 4K fitting, original FPS/timestamps, and original-audio remuxing.
+          - Overlapped adaptive tiling, a single resident model, one-frame-at-a-time memory use, FP16 acceleration, and thermal backoff.
+          - Android: ncnn + Vulkan, native YUV conversion, MediaCodec/MediaMuxer output.
+          - iPhone: FP16 Core ML + Metal/Neural Engine selection, AVAssetReader/AVAssetWriter output.
+          - No server, account, GPU fee, or media upload.
 
           ### AniScale Clean
 
