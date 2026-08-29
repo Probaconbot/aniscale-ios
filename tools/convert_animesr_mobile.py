@@ -163,7 +163,7 @@ def export(checkpoint: Path, output: Path) -> None:
         inputs=[
             ct.TensorType(name="frames", shape=(1, 9, height, width)),
             ct.TensorType(name="feedback", shape=(1, 3, height4, width4)),
-            ct.TensorType(name="state", shape=(1, 64, height, width)),
+            ct.TensorType(name="recurrent_state", shape=(1, 64, height, width)),
         ],
         outputs=[
             ct.TensorType(name="enhanced"),
@@ -175,6 +175,16 @@ def export(checkpoint: Path, output: Path) -> None:
     package.author = "Tencent ARC Lab; mobile conversion by AniScale"
     package.license = "Apache-2.0"
     package.short_description = "AnimeSR_v2 recurrent 4x anime video super-resolution cell"
+    specification = package.get_spec()
+    input_names = {feature.name for feature in specification.description.input}
+    output_names = {feature.name for feature in specification.description.output}
+    expected_inputs = {"frames", "feedback", "recurrent_state"}
+    expected_outputs = {"enhanced", "next_state"}
+    if input_names != expected_inputs or output_names != expected_outputs:
+        raise RuntimeError(
+            "Unexpected Core ML interface: "
+            f"inputs={sorted(input_names)}, outputs={sorted(output_names)}"
+        )
     package.save(output / "AniUltraAnime_v2_recurrent.mlpackage")
 
 

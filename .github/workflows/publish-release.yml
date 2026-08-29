@@ -10,7 +10,7 @@ on:
       version:
         description: Release version without the v prefix
         required: true
-        default: 1.14.0
+        default: 1.14.1
         type: string
 
 permissions:
@@ -58,9 +58,14 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           cat > release-notes.md <<EOF
-          ## AniScale ${VERSION} — AniUltraAnime recurrent video SR
+          ## AniScale ${VERSION} — AniUltraAnime iPhone hotfix
 
           This release replaces the Clean and untrained Ultra selectors with a real AnimeSR_v2 recurrent anime-video engine on Android and iPhone.
+
+          ### Fixed in 1.14.1
+
+          - Fixed the iPhone AnimeSR recurrent-state input binding that caused `Feature state_workaround is required but not specified` before the first frame.
+          - Added a build-time Core ML interface check so input/output renaming fails CI instead of reaching users.
 
           ### AniUltraAnime
 

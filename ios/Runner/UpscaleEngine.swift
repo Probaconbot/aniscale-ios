@@ -791,7 +791,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       )
     }
     let provider = try MLDictionaryFeatureProvider(
-      dictionary: ["frames": frames, "feedback": feedback, "state": hidden]
+      dictionary: ["frames": frames, "feedback": feedback, "recurrent_state": hidden]
     )
     let prediction = try animeUltraModel.prediction(from: provider)
     guard
