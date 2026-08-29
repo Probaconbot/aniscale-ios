@@ -65,15 +65,17 @@ class MainActivity : FlutterActivity() {
     private val cancelled = AtomicBoolean(false)
     private var progressSink: EventChannel.EventSink? = null
     @Volatile private var initialized = false
-    private val ultraEnvironment by lazy { OrtEnvironment.getEnvironment() }
-    private val ultraSession by lazy {
+    private val animeEnvironment by lazy { OrtEnvironment.getEnvironment() }
+    private val animeSession by lazy {
         val options = OrtSession.SessionOptions().apply {
             setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+            setIntraOpNumThreads(2)
+            setInterOpNumThreads(1)
         }
-        val model = assets.open("models/AniUltraScale_experimental_2x.onnx").use {
+        val model = assets.open("models/AniUltraAnime_v2_recurrent.onnx").use {
             it.readBytes()
         }
-        ultraEnvironment.createSession(model, options)
+        animeEnvironment.createSession(model, options)
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -211,7 +213,7 @@ class MainActivity : FlutterActivity() {
         val codec = call.argument<String>("codec") ?: "hevc"
         if (path.isNullOrBlank() || scale !in listOf(2, 4) ||
             targetScale !in listOf(1.5, 2.0, 3.0, 4.0) ||
-            engine !in listOf("fusion", "render", "turbo", "clean", "ultra", "superUltra") ||
+            engine !in listOf("fusion", "render", "turbo", "superUltra", "animeUltra") ||
             content !in listOf("auto", "live", "anime") ||
             detailMode !in listOf("natural", "detailed", "sharp") ||
             codec !in listOf("hevc", "h264")) {
@@ -222,8 +224,7 @@ class MainActivity : FlutterActivity() {
         worker.execute {
             try {
                 when (engine) {
-                    "ultra" -> ultraSession
-                    "clean" -> Unit
+                    "animeUltra" -> animeSession
                     else -> ensureModels()
                 }
                 val response = processVideo(
@@ -280,7 +281,7 @@ class MainActivity : FlutterActivity() {
         val maxInputEdge = if (!nativeUsesVulkan()) {
             if (engine == "turbo") 480 else 384
         } else when (engine) {
-            "ultra" -> 320
+            "animeUltra" -> if (efficient) 240 else 320
             "superUltra" -> if (efficient) 720 else 960
             "turbo" -> if (efficient) 720 else 960
             "render" -> if (efficient) 640 else 896
@@ -349,9 +350,78 @@ class MainActivity : FlutterActivity() {
         try {
             encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             encoder.start()
-            var sourceFrame: Bitmap? = fittedFirst
+            var sourceFrame: Bitmap? = if (engine == "animeUltra") null else fittedFirst
+            var previousAnimeFrame: Bitmap? = null
+            var currentAnimeFrame: Bitmap? = if (engine == "animeUltra") fittedFirst else null
+            var nextAnimeFrame: Bitmap? = if (engine == "animeUltra" && frameCount > 1) {
+                frameAt(retriever, 1, fps)?.let { decoded ->
+                    if (decoded.width == inputWidth && decoded.height == inputHeight) {
+                        decoded
+                    } else {
+                        Bitmap.createScaledBitmap(decoded, inputWidth, inputHeight, true).also {
+                            decoded.recycle()
+                        }
+                    }
+                }
+            } else {
+                null
+            }
+            val animeState = AnimeRuntimeState()
             for (frameIndex in 0 until frameCount) {
                 check(!cancelled.get()) { "Video upscaling was cancelled." }
+                if (engine == "animeUltra") {
+                    val current = currentAnimeFrame ?: break
+                    val next = nextAnimeFrame ?: current
+                    val previous = previousAnimeFrame ?: current
+                    if (previousAnimeFrame != null && isSceneCut(previous, current)) {
+                        animeState.reset()
+                    }
+                    val enhanced = upscaleAnime(previous, current, next, animeState)
+                    previousAnimeFrame?.recycle()
+                    previousAnimeFrame = current
+                    currentAnimeFrame = nextAnimeFrame
+                    nextAnimeFrame = if (frameIndex + 2 < frameCount) {
+                        frameAt(retriever, frameIndex + 2, fps)?.let { decoded ->
+                            if (decoded.width == inputWidth && decoded.height == inputHeight) {
+                                decoded
+                            } else {
+                                Bitmap.createScaledBitmap(
+                                    decoded,
+                                    inputWidth,
+                                    inputHeight,
+                                    true,
+                                ).also { decoded.recycle() }
+                            }
+                        }
+                    } else {
+                        null
+                    }
+                    val outputFrame = if (
+                        enhanced.width == outputWidth && enhanced.height == outputHeight
+                    ) {
+                        enhanced
+                    } else {
+                        Bitmap.createScaledBitmap(
+                            enhanced,
+                            outputWidth,
+                            outputHeight,
+                            true,
+                        ).also { enhanced.recycle() }
+                    }
+                    queueFrame(
+                        encoder,
+                        outputFrame,
+                        frameIndex,
+                        fps,
+                        muxer,
+                        muxState,
+                        audioFormat,
+                    )
+                    outputFrame.recycle()
+                    applyThermalBackoff(frameIndex)
+                    emitProgress(0.02 + (frameIndex + 1).toDouble() / frameCount * 0.92)
+                    continue
+                }
                 val decoded = sourceFrame ?: frameAt(retriever, frameIndex, fps)
                 sourceFrame = null
                 if (decoded == null) continue
@@ -362,10 +432,8 @@ class MainActivity : FlutterActivity() {
                         decoded.recycle()
                     }
                 }
-                val prepared = if (engine == "clean") cleanupFrame(fitted) else fitted
-                if (prepared !== fitted) fitted.recycle()
-                val rgba = prepared.copy(Bitmap.Config.ARGB_8888, false)
-                prepared.recycle()
+                val rgba = fitted.copy(Bitmap.Config.ARGB_8888, false)
+                fitted.recycle()
                 val modelSharpness = when (engine) {
                     "superUltra" -> when (detailMode) {
                         "sharp" -> 0.16f
@@ -377,14 +445,6 @@ class MainActivity : FlutterActivity() {
                     else -> 0.28f
                 }
                 val enhanced = when (engine) {
-                    "ultra" -> upscaleUltraExperimental(rgba)
-                    // Avoid neural re-amplification of residual scanlines.
-                    "clean" -> Bitmap.createScaledBitmap(
-                        rgba,
-                        outputWidth,
-                        outputHeight,
-                        true,
-                    )
                     "superUltra" -> nativeUpscale(
                         rgba,
                         if (content == "anime") "superultra_anime" else "superultra_live",
@@ -415,6 +475,9 @@ class MainActivity : FlutterActivity() {
                 applyThermalBackoff(frameIndex)
                 emitProgress(0.02 + (frameIndex + 1).toDouble() / frameCount * 0.92)
             }
+            listOfNotNull(previousAnimeFrame, currentAnimeFrame, nextAnimeFrame)
+                .distinctBy { System.identityHashCode(it) }
+                .forEach { if (!it.isRecycled) it.recycle() }
             queueEndOfStream(encoder, frameCount, fps, muxer, muxState, audioFormat)
             if (sourceAudioTrack >= 0 && muxState.audioTrack >= 0) {
                 copyAudio(audioExtractor, sourceAudioTrack, muxer, muxState.audioTrack)
@@ -447,6 +510,8 @@ class MainActivity : FlutterActivity() {
             "durationSeconds" to durationMs / 1000.0,
             "engine" to if (engine == "superUltra") {
                 "SuperUltra — ${contentLabel(content)}, ${detailMode.replaceFirstChar { it.uppercase() }} (${backendLabel(engine)})"
+            } else if (engine == "animeUltra") {
+                "AniUltraAnime — AnimeSR_v2 recurrent (${backendLabel(engine)})"
             } else {
                 "${engineLabel(engine)} (${backendLabel(engine)})"
             },
@@ -457,12 +522,10 @@ class MainActivity : FlutterActivity() {
         check(exists() || mkdirs()) { "AniScale could not create its local history folder." }
     }
 
-    private fun backendLabel(engine: String? = null): String = if (engine == "ultra") {
-        "ONNX Runtime — untrained"
+    private fun backendLabel(engine: String? = null): String = if (engine == "animeUltra") {
+        "ONNX Runtime Mobile"
     } else if (engine == "superUltra") {
         if (nativeUsesVulkan()) "SPAN ncnn Vulkan FP16" else "SPAN ncnn CPU"
-    } else if (engine == "clean") {
-        "Native restoration + Lanczos"
     } else if (nativeUsesVulkan()) {
         "Android ncnn Vulkan FP16"
     } else {
@@ -472,8 +535,7 @@ class MainActivity : FlutterActivity() {
     private fun engineLabel(engine: String): String = when (engine) {
         "render" -> "AniScale Render"
         "turbo" -> "AniScale Turbo"
-        "clean" -> "AniScale Clean"
-        "ultra" -> "AniUltraScale Experimental"
+        "animeUltra" -> "AniUltraAnime"
         "superUltra" -> "SuperUltra"
         else -> "AniScale Fusion"
     }
@@ -506,112 +568,147 @@ class MainActivity : FlutterActivity() {
         if (pauseMs > 0) Thread.sleep(pauseMs)
     }
 
-    /**
-     * Mobile-safe cleanup pass for patterned/green-cast footage. It blends a
-     * vertical three-tap filter to suppress scanlines, neutralizes excessive
-     * green, and applies restrained local contrast before Fusion upscaling.
-     */
-    private fun cleanupFrame(bitmap: Bitmap): Bitmap {
-        val width = bitmap.width
-        val height = bitmap.height
-        val source = IntArray(width * height)
-        val horizontal = IntArray(source.size)
-        val output = IntArray(source.size)
-        bitmap.getPixels(source, 0, width, 0, 0, width, height)
-        // First remove the vertical display-line component with a five-tap
-        // horizontal low-pass. Two passes are faster than a full 5x3 kernel.
-        for (y in 0 until height) {
-            for (x in 0 until width) {
-                val index = y * width + x
-                val p2l = source[y * width + max(0, x - 2)]
-                val p1l = source[y * width + max(0, x - 1)]
-                val p = source[index]
-                val p1r = source[y * width + min(width - 1, x + 1)]
-                val p2r = source[y * width + min(width - 1, x + 2)]
-                val r = (((p shr 16) and 255) * 2 + ((p1l shr 16) and 255) * 2 + ((p1r shr 16) and 255) * 2 + ((p2l shr 16) and 255) + ((p2r shr 16) and 255)) / 8
-                val g = (((p shr 8) and 255) * 2 + ((p1l shr 8) and 255) * 2 + ((p1r shr 8) and 255) * 2 + ((p2l shr 8) and 255) + ((p2r shr 8) and 255)) / 8
-                val b = ((p and 255) * 2 + (p1l and 255) * 2 + (p1r and 255) * 2 + (p2l and 255) + (p2r and 255)) / 8
-                horizontal[index] = (p and -0x1000000) or (r shl 16) or (g shl 8) or b
-            }
+    private data class AnimeRuntimeState(
+        var width: Int = 0,
+        var height: Int = 0,
+        var feedback: FloatArray = FloatArray(0),
+        var hidden: FloatArray = FloatArray(0),
+    ) {
+        fun ensureSize(newWidth: Int, newHeight: Int) {
+            if (width == newWidth && height == newHeight && feedback.isNotEmpty()) return
+            width = newWidth
+            height = newHeight
+            feedback = FloatArray(3 * newWidth * 4 * newHeight * 4)
+            hidden = FloatArray(64 * newWidth * newHeight)
         }
-        // Then suppress horizontal scanlines and perform green-cast removal.
-        for (y in 0 until height) {
-            val above = max(0, y - 1)
-            val below = min(height - 1, y + 1)
-            for (x in 0 until width) {
-                val index = y * width + x
-                val p = horizontal[index]
-                val pa = horizontal[above * width + x]
-                val pb = horizontal[below * width + x]
-                var r = (((p shr 16) and 255) * 2 + ((pa shr 16) and 255) + ((pb shr 16) and 255)) / 4
-                var g = (((p shr 8) and 255) * 2 + ((pa shr 8) and 255) + ((pb shr 8) and 255)) / 4
-                var b = ((p and 255) * 2 + (pa and 255) + (pb and 255)) / 4
-                val neutral = (r + b) / 2
-                if (g > neutral) g = (neutral + (g - neutral) * 0.12f).roundToInt()
-                r = ((r - 128) * 1.03f + 132).roundToInt().coerceIn(0, 255)
-                g = ((g - 128) * 1.01f + 126).roundToInt().coerceIn(0, 255)
-                b = ((b - 128) * 1.03f + 133).roundToInt().coerceIn(0, 255)
-                output[index] = (source[index] and -0x1000000) or (r shl 16) or (g shl 8) or b
-            }
+
+        fun reset() {
+            feedback.fill(0f)
+            hidden.fill(0f)
         }
-        return Bitmap.createBitmap(output, width, height, Bitmap.Config.ARGB_8888)
     }
 
-    private fun upscaleUltraExperimental(bitmap: Bitmap): Bitmap {
-        val width = 320
-        val height = 180
-        val outputWidth = width * 2
-        val outputHeight = height * 2
-        val source = Bitmap.createScaledBitmap(bitmap, width, height, true)
-        val pixels = IntArray(width * height)
-        source.getPixels(pixels, 0, width, 0, 0, width, height)
-        if (source !== bitmap) source.recycle()
+    private fun upscaleAnime(
+        previous: Bitmap,
+        current: Bitmap,
+        next: Bitmap,
+        state: AnimeRuntimeState,
+    ): Bitmap {
+        val width = current.width
+        val height = current.height
         val plane = width * height
-        val input = FloatArray(5 * 3 * plane)
-        for (frame in 0 until 5) {
-            val frameOffset = frame * 3 * plane
-            for (index in pixels.indices) {
-                val pixel = pixels[index]
-                input[frameOffset + index] = ((pixel shr 16) and 0xff) / 255f
-                input[frameOffset + plane + index] = ((pixel shr 8) and 0xff) / 255f
-                input[frameOffset + 2 * plane + index] = (pixel and 0xff) / 255f
-            }
-        }
+        val outputWidth = width * 4
+        val outputHeight = height * 4
+        state.ensureSize(width, height)
+        val frames = FloatArray(9 * plane)
+        appendRgbPlanes(previous, frames, 0)
+        appendRgbPlanes(current, frames, 3 * plane)
+        appendRgbPlanes(next, frames, 6 * plane)
         OnnxTensor.createTensor(
-            ultraEnvironment,
-            FloatBuffer.wrap(input),
-            longArrayOf(1, 5, 3, height.toLong(), width.toLong()),
+            animeEnvironment,
+            FloatBuffer.wrap(frames),
+            longArrayOf(1, 9, height.toLong(), width.toLong()),
         ).use { framesTensor ->
             OnnxTensor.createTensor(
-                ultraEnvironment,
-                FloatBuffer.wrap(floatArrayOf(1f, 0.82f)),
-                longArrayOf(1, 2),
-            ).use { controlsTensor ->
-                ultraSession.run(
-                    mapOf("frames" to framesTensor, "controls" to controlsTensor),
-                ).use { result ->
-                    @Suppress("UNCHECKED_CAST")
-                    val output = result[0].value as Array<Array<Array<FloatArray>>>
-                    val channels = output[0]
-                    val outputPixels = IntArray(outputWidth * outputHeight)
-                    for (y in 0 until outputHeight) {
-                        for (x in 0 until outputWidth) {
-                            val red = (channels[0][y][x].coerceIn(0f, 1f) * 255).roundToInt()
-                            val green = (channels[1][y][x].coerceIn(0f, 1f) * 255).roundToInt()
-                            val blue = (channels[2][y][x].coerceIn(0f, 1f) * 255).roundToInt()
-                            outputPixels[y * outputWidth + x] =
-                                (0xff shl 24) or (red shl 16) or (green shl 8) or blue
+                animeEnvironment,
+                FloatBuffer.wrap(state.feedback),
+                longArrayOf(1, 3, outputHeight.toLong(), outputWidth.toLong()),
+            ).use { feedbackTensor ->
+                OnnxTensor.createTensor(
+                    animeEnvironment,
+                    FloatBuffer.wrap(state.hidden),
+                    longArrayOf(1, 64, height.toLong(), width.toLong()),
+                ).use { stateTensor ->
+                    animeSession.run(
+                        mapOf(
+                            "frames" to framesTensor,
+                            "feedback" to feedbackTensor,
+                            "state" to stateTensor,
+                        ),
+                    ).use { result ->
+                        @Suppress("UNCHECKED_CAST")
+                        val enhanced = result[0].value as Array<Array<Array<FloatArray>>>
+                        @Suppress("UNCHECKED_CAST")
+                        val nextState = result[1].value as Array<Array<Array<FloatArray>>>
+                        val enhancedChannels = enhanced[0]
+                        val stateChannels = nextState[0]
+                        state.feedback = flattenChannels(
+                            enhancedChannels,
+                            3,
+                            outputHeight,
+                            outputWidth,
+                        )
+                        state.hidden = flattenChannels(stateChannels, 64, height, width)
+                        val outputPixels = IntArray(outputWidth * outputHeight)
+                        for (y in 0 until outputHeight) {
+                            for (x in 0 until outputWidth) {
+                                val red = (enhancedChannels[0][y][x].coerceIn(0f, 1f) * 255).roundToInt()
+                                val green = (enhancedChannels[1][y][x].coerceIn(0f, 1f) * 255).roundToInt()
+                                val blue = (enhancedChannels[2][y][x].coerceIn(0f, 1f) * 255).roundToInt()
+                                outputPixels[y * outputWidth + x] =
+                                    (0xff shl 24) or (red shl 16) or (green shl 8) or blue
+                            }
                         }
+                        return Bitmap.createBitmap(
+                            outputPixels,
+                            outputWidth,
+                            outputHeight,
+                            Bitmap.Config.ARGB_8888,
+                        )
                     }
-                    return Bitmap.createBitmap(
-                        outputPixels,
-                        outputWidth,
-                        outputHeight,
-                        Bitmap.Config.ARGB_8888,
-                    )
                 }
             }
         }
+    }
+
+    private fun appendRgbPlanes(bitmap: Bitmap, destination: FloatArray, offset: Int) {
+        val width = bitmap.width
+        val height = bitmap.height
+        val plane = width * height
+        val pixels = IntArray(plane)
+        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+        for (index in pixels.indices) {
+            val pixel = pixels[index]
+            destination[offset + index] = ((pixel shr 16) and 0xff) / 255f
+            destination[offset + plane + index] = ((pixel shr 8) and 0xff) / 255f
+            destination[offset + 2 * plane + index] = (pixel and 0xff) / 255f
+        }
+    }
+
+    private fun flattenChannels(
+        source: Array<Array<FloatArray>>,
+        channels: Int,
+        height: Int,
+        width: Int,
+    ): FloatArray {
+        val output = FloatArray(channels * height * width)
+        val plane = height * width
+        for (channel in 0 until channels) {
+            for (y in 0 until height) {
+                source[channel][y].copyInto(output, channel * plane + y * width)
+            }
+        }
+        return output
+    }
+
+    private fun isSceneCut(previous: Bitmap, current: Bitmap): Boolean {
+        val stepX = max(1, current.width / 32)
+        val stepY = max(1, current.height / 18)
+        var difference = 0.0
+        var samples = 0
+        for (y in 0 until current.height step stepY) {
+            for (x in 0 until current.width step stepX) {
+                val first = previous.getPixel(x, y)
+                val second = current.getPixel(x, y)
+                val firstLuma = 0.2126 * ((first shr 16) and 255) +
+                    0.7152 * ((first shr 8) and 255) + 0.0722 * (first and 255)
+                val secondLuma = 0.2126 * ((second shr 16) and 255) +
+                    0.7152 * ((second shr 8) and 255) + 0.0722 * (second and 255)
+                difference += kotlin.math.abs(firstLuma - secondLuma) / 255.0
+                samples++
+            }
+        }
+        return samples > 0 && difference / samples > 0.28
     }
 
     private fun fitOutput(width: Int, height: Int, scale: Double): Pair<Int, Int> {

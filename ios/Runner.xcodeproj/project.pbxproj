@@ -15,7 +15,7 @@
 		A11CA1E22F51000100A11CA1 /* RealESRGAN_anime_6B_266_fp16.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = A11CA1E12F51000100A11CA1 /* RealESRGAN_anime_6B_266_fp16.mlpackage */; };
 		A11CA1E52F51000100A11CA1 /* RealESRGAN_render_x4plus_266_fp16.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = A11CA1E42F51000100A11CA1 /* RealESRGAN_render_x4plus_266_fp16.mlpackage */; };
 		A11CA1E72F51000100A11CA1 /* AniScale_turbo_animevideo_266_fp16.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = A11CA1E62F51000100A11CA1 /* AniScale_turbo_animevideo_266_fp16.mlpackage */; };
-		A11CA1E92F51000100A11CA1 /* AniUltraScale_experimental_2x.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = A11CA1E82F51000100A11CA1 /* AniUltraScale_experimental_2x.mlpackage */; };
+		A11CA1E92F51000100A11CA1 /* AniUltraAnime_v2_recurrent.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = A11CA1E82F51000100A11CA1 /* AniUltraAnime_v2_recurrent.mlpackage */; };
 		A11CA2012F52000100A11CA1 /* SuperUltra_span_x2_fp16.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = A11CA2042F52000100A11CA1 /* SuperUltra_span_x2_fp16.mlpackage */; };
 		A11CA2022F52000100A11CA1 /* SuperUltra_span_x4_fp16.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = A11CA2052F52000100A11CA1 /* SuperUltra_span_x4_fp16.mlpackage */; };
 		A11CA2032F52000100A11CA1 /* SuperUltra_span_anime_x2_fp16.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = A11CA2062F52000100A11CA1 /* SuperUltra_span_anime_x2_fp16.mlpackage */; };
@@ -61,7 +61,7 @@
 		A11CA1E12F51000100A11CA1 /* RealESRGAN_anime_6B_266_fp16.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = RealESRGAN_anime_6B_266_fp16.mlpackage; sourceTree = "<group>"; };
 		A11CA1E42F51000100A11CA1 /* RealESRGAN_render_x4plus_266_fp16.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = RealESRGAN_render_x4plus_266_fp16.mlpackage; sourceTree = "<group>"; };
 		A11CA1E62F51000100A11CA1 /* AniScale_turbo_animevideo_266_fp16.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = AniScale_turbo_animevideo_266_fp16.mlpackage; sourceTree = "<group>"; };
-		A11CA1E82F51000100A11CA1 /* AniUltraScale_experimental_2x.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = AniUltraScale_experimental_2x.mlpackage; sourceTree = "<group>"; };
+		A11CA1E82F51000100A11CA1 /* AniUltraAnime_v2_recurrent.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = AniUltraAnime_v2_recurrent.mlpackage; sourceTree = "<group>"; };
 		A11CA2042F52000100A11CA1 /* SuperUltra_span_x2_fp16.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = SuperUltra_span_x2_fp16.mlpackage; sourceTree = "<group>"; };
 		A11CA2052F52000100A11CA1 /* SuperUltra_span_x4_fp16.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = SuperUltra_span_x4_fp16.mlpackage; sourceTree = "<group>"; };
 		A11CA2062F52000100A11CA1 /* SuperUltra_span_anime_x2_fp16.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = SuperUltra_span_anime_x2_fp16.mlpackage; sourceTree = "<group>"; };
@@ -152,7 +152,7 @@
 				A11CA1E12F51000100A11CA1 /* RealESRGAN_anime_6B_266_fp16.mlpackage */,
 				A11CA1E42F51000100A11CA1 /* RealESRGAN_render_x4plus_266_fp16.mlpackage */,
 				A11CA1E62F51000100A11CA1 /* AniScale_turbo_animevideo_266_fp16.mlpackage */,
-				A11CA1E82F51000100A11CA1 /* AniUltraScale_experimental_2x.mlpackage */,
+				A11CA1E82F51000100A11CA1 /* AniUltraAnime_v2_recurrent.mlpackage */,
 				A11CA2042F52000100A11CA1 /* SuperUltra_span_x2_fp16.mlpackage */,
 				A11CA2052F52000100A11CA1 /* SuperUltra_span_x4_fp16.mlpackage */,
 				A11CA2062F52000100A11CA1 /* SuperUltra_span_anime_x2_fp16.mlpackage */,
@@ -260,7 +260,7 @@
 				A11CA1E22F51000100A11CA1 /* RealESRGAN_anime_6B_266_fp16.mlpackage in Resources */,
 				A11CA1E52F51000100A11CA1 /* RealESRGAN_render_x4plus_266_fp16.mlpackage in Resources */,
 				A11CA1E72F51000100A11CA1 /* AniScale_turbo_animevideo_266_fp16.mlpackage in Resources */,
-				A11CA1E92F51000100A11CA1 /* AniUltraScale_experimental_2x.mlpackage in Resources */,
+				A11CA1E92F51000100A11CA1 /* AniUltraAnime_v2_recurrent.mlpackage in Resources */,
 				A11CA2012F52000100A11CA1 /* SuperUltra_span_x2_fp16.mlpackage in Resources */,
 				A11CA2022F52000100A11CA1 /* SuperUltra_span_x4_fp16.mlpackage in Resources */,
 				A11CA2032F52000100A11CA1 /* SuperUltra_span_anime_x2_fp16.mlpackage in Resources */,

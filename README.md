@@ -9,12 +9,13 @@ AniScale is a private, offline-first image and video enhancer for iPhone and And
 - Image picker for PNG, JPG, and WebP
 - Local 2× and 4× AniScale Fusion image upscaling through Core ML with automatic
   memory-safe fitting for large camera images
-- Local 2× and 4× video enhancement with AniScale Fusion for anime/stylized 3D, AniScale Clean for
-  patterned/color-damaged footage, the separate heavy
+- Local 2× and 4× video enhancement with AniScale Fusion for anime/stylized 3D, the separate heavy
   AniScale Render model for general 3D, and compact AniScale Turbo for lower heat, with progress,
   cancellation, original audio, automatic encoder-safe 4K fitting, and Efficient and Maximum modes
 - SuperUltra offline SPAN video restoration on Android and iOS with 1.5×, 2×, 3×, and 4× output,
   Auto/Live Action/Anime content modes, Natural/Detailed/Sharp controls, and HEVC/H.264 export
+- AniUltraAnime video-only restoration using the official AnimeSR_v2 recurrent checkpoint, three
+  neighboring frames, persistent previous-output/hidden state, and automatic scene-cut reset
 - Processing, before/after comparison, persistent image/video history, reopen, delete, playback, settings, save, and share flows
 - Local upscaling never uploads media; no account or watermark
 - Optional Groq vision planning: attach an image and describe the result, then review a structured
@@ -47,15 +48,17 @@ memory without writing intermediate PNG files, overlapping tiles suppress seams,
 model stays resident, and thermal backoff reduces sustained load. The 1.5× and 3× choices use one
 native SPAN pass followed by a controlled high-quality downsample.
 
-AniScale Clean is a separate video restoration pipeline for green casts, scanlines, moiré-like
-patterning, chroma noise, blur, and compression damage. It runs bounded native cleanup followed by
-controlled Lanczos enlargement, using Core Image on iOS and an optimized bitmap pass on Android.
-Damaged footage is deliberately not passed into a generative SR model because that can amplify
-residual stripes into false detail. The desktop
-[VideoDemoireing](https://github.com/CVMI-Lab/VideoDemoireing) and
-[BasicVSR++](https://github.com/ckkelvinchan/BasicVSR_PlusPlus) implementations are documented as
-future training teachers; their CUDA/MMCV/custom-operator checkpoints are not falsely presented as
-mobile models.
+AniUltraAnime is a true recurrent video model rather than a renamed frame upscaler. Android runs a
+dynamic-spatial ONNX conversion through ONNX Runtime Mobile. iOS runs the same recurrent cell as a
+Core ML FP16 ML Program. Both implementations keep frames chronological, use previous/current/next
+context, propagate the previous 4× result and 64-channel hidden state, and clear both at detected
+scene cuts. The official network is natively 4×; the 2× choice performs one high-quality downsample
+after inference, matching the upstream inference design.
+
+[AniRealism](docs/ANIREALISM.md) is designed around CDA-VSR, but it is not enabled or bundled because
+the current upstream repository does not contain the `LICENSE.txt` named by its README. AniScale will
+not redistribute that public checkpoint until the authors publish applicable terms or give written
+permission.
 
 App launch includes the supplied 3.809-second voice and 2.617-second SFX: voice begins immediately,
 SFX begins at 1.0 second, the logo zooms/fades, and the main interface opens at 3.0 seconds while the
@@ -77,10 +80,8 @@ gated neighboring-frame interaction, forward/backward recurrent propagation, and
 PiSA-style fidelity/detail residual controls. FAST and QUALITY configurations, real-video
 degradation, cleaning, temporal, frequency, and edge losses, and guarded Core ML/ONNX export are
 versioned in the repository.
-AniUltraScale Experimental can be selected for architecture testing with deterministic, explicitly
-untrained weights. Its output may be noisy or unusable and it is not the production checkpoint.
-AniUltraScale will not be labelled production-ready until trained weights and physical
-Android/iPhone benchmarks pass the documented release gate.
+The older untrained AniUltraScale runtime is no longer included in the app. The research and training
+materials remain versioned for reproducibility but cannot be selected as a user-facing engine.
 
 ## Run
 

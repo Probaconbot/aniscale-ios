@@ -69,34 +69,40 @@ jobs:
           test -f ios/Runner/Models/RealESRGAN_render_x4plus_266_fp16.mlpackage/Manifest.json
           test -f ios/Runner/Models/AniScale_turbo_animevideo_266_fp16.mlpackage/Manifest.json
 
-      - name: Restore AniUltraScale experimental runtime
-        id: ultra-cache
+      - name: Restore AniUltraAnime recurrent runtime
+        id: anime-vsr-cache
         uses: actions/cache@v4
         with:
           path: |
-            ios/Runner/Models/AniUltraScale_experimental_2x.mlpackage
-            android/app/src/main/assets/models/AniUltraScale_experimental_2x.onnx
-          key: aniultrascale-untrained-v2-${{ hashFiles('training/aniultrascale_model.py', 'training/export_aniultrascale_experimental.py', 'training/configs/aniultrascale_fast.json') }}
+            ios/Runner/Models/AniUltraAnime_v2_recurrent.mlpackage
+            android/app/src/main/assets/models/AniUltraAnime_v2_recurrent.onnx
+          key: aniultraanime-v2-mobile-v1-${{ hashFiles('tools/convert_animesr_mobile.py') }}
 
-      - name: Export explicitly untrained AniUltraScale runtime
-        if: steps.ultra-cache.outputs.cache-hit != 'true'
+      - name: Convert official AnimeSR v2 for Android and iPhone
+        if: steps.anime-vsr-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "numpy<2" "torch==2.5.1" "coremltools==8.1" "onnx==1.17.0"
-          mkdir -p build/aniultra ios/Runner/Models android/app/src/main/assets/models
-          python training/export_aniultrascale_experimental.py \
-            --output build/aniultra --onnx --coreml
-          cp build/aniultra/AniUltraScale_experimental_2x.onnx \
+          python -m pip install "numpy<2" "torch==2.5.1" "coremltools==8.1" "onnx==1.17.0" "gdown==5.2.0"
+          mkdir -p "$RUNNER_TEMP/animesr-weights" build/aniultraanime ios/Runner/Models android/app/src/main/assets/models
+          gdown --folder 'https://drive.google.com/drive/folders/1gwNTbKLUjt5FlgT6PQQnBz5wFzmNUX8g' \
+            -O "$RUNNER_TEMP/animesr-weights"
+          ANIME_CHECKPOINT="$(find "$RUNNER_TEMP/animesr-weights" -type f -name 'AnimeSR_v2.pth' -print -quit)"
+          test -n "$ANIME_CHECKPOINT"
+          shasum -a 256 "$ANIME_CHECKPOINT"
+          python tools/convert_animesr_mobile.py \
+            --checkpoint "$ANIME_CHECKPOINT" \
+            --output build/aniultraanime
+          cp build/aniultraanime/AniUltraAnime_v2_recurrent.onnx \
             android/app/src/main/assets/models/
-          cp -R build/aniultra/AniUltraScale_experimental_2x.mlpackage \
+          cp -R build/aniultraanime/AniUltraAnime_v2_recurrent.mlpackage \
             ios/Runner/Models/
 
-      - name: Verify AniUltraScale experimental assets
+      - name: Verify AniUltraAnime recurrent assets
         shell: bash
         run: |
-          test -f ios/Runner/Models/AniUltraScale_experimental_2x.mlpackage/Manifest.json
-          test -f android/app/src/main/assets/models/AniUltraScale_experimental_2x.onnx
+          test -f ios/Runner/Models/AniUltraAnime_v2_recurrent.mlpackage/Manifest.json
+          test -f android/app/src/main/assets/models/AniUltraAnime_v2_recurrent.onnx
 
       - name: Restore SuperUltra Core ML models
         id: superultra-coreml-cache

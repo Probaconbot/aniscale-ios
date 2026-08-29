@@ -10,7 +10,7 @@ on:
       version:
         description: Release version without the v prefix
         required: true
-        default: 1.13.0
+        default: 1.14.0
         type: string
 
 permissions:
@@ -58,85 +58,34 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           cat > release-notes.md <<EOF
-          ## AniScale ${VERSION} — SuperUltra offline SPAN video upscaling
+          ## AniScale ${VERSION} — AniUltraAnime recurrent video SR
 
-          This release adds SuperUltra as a real offline video engine on Android and iPhone, using SPAN with native mobile acceleration instead of relabelling an existing Real-ESRGAN path.
+          This release replaces the Clean and untrained Ultra selectors with a real AnimeSR_v2 recurrent anime-video engine on Android and iPhone.
 
-          ### SuperUltra
+          ### AniUltraAnime
 
-          - Official SPAN x2/x4 checkpoints for fast, sharp, local video restoration.
-          - Separate attributed HFA2k SPAN x2 checkpoint for Anime mode.
-          - Auto, Live Action, and Anime content controls.
-          - 1.5×, 2×, 3×, and 4× outputs; 1.5×/3× use a native SPAN pass followed by one high-quality downsample.
-          - Natural, Detailed, and Sharp modes with conservative local detail rather than heavy halo sharpening.
-          - HEVC output with H.264 selection/fallback, encoder-safe 4K fitting, original FPS/timestamps, and original-audio remuxing.
-          - Overlapped adaptive tiling, a single resident model, one-frame-at-a-time memory use, FP16 acceleration, and thermal backoff.
-          - Android: ncnn + Vulkan, native YUV conversion, MediaCodec/MediaMuxer output.
-          - iPhone: FP16 Core ML + Metal/Neural Engine selection, AVAssetReader/AVAssetWriter output.
-          - No server, account, GPU fee, or media upload.
+          - Official Apache-2.0 AnimeSR_v2 architecture and pretrained checkpoint.
+          - Previous/current/next frame context instead of frame-independent enhancement.
+          - Persistent previous 4× output and 64-channel recurrent hidden state.
+          - Automatic state reset at detected scene cuts to prevent information leaking between shots.
+          - Native 4× inference plus a high-quality 2× output option, matching the official AnimeSR design.
+          - Fast and Best working-resolution modes with bounded memory and thermal backoff.
+          - Android: dynamic-spatial ONNX model through ONNX Runtime Mobile.
+          - iPhone: flexible-shape FP16 Core ML model using available Apple acceleration.
+          - Original timestamps, FPS, aspect ratio, and audio are retained through the existing streaming video pipeline.
 
-          ### AniScale Clean
+          ### Removed engines
 
-          - New video engine choice for footage with green casts, scanlines, moiré-like patterning, chroma noise, blur, and compression damage.
-          - Bypasses generative Fusion for damaged footage so residual scanlines are not hallucinated into stronger false detail.
-          - Uses stronger green neutralization, two-axis pattern suppression, restrained denoise, and controlled Lanczos enlargement.
-          - Uses Core Image acceleration on iPhone and a bounded native Android restoration pass without a desktop CUDA dependency.
-          - Preserves original audio and the existing encoder-safe output behavior.
+          - AniScale Clean has been removed from the app.
+          - The untrained AniUltraScale Experimental runtime and model assets have been removed from release builds.
 
-          ### Branded launch
+          ### AniRealism status
 
-          - Bundles the supplied 3.809-second voice and 2.617-second SFX.
-          - Voice starts immediately, SFX starts at 1.0 second, and the app opens at 3.0 seconds while the voice finishes naturally.
-          - AniScale logo zooms in and fades into the main interface.
+          AniRealism's CDA-VSR runtime contract is documented, but CDA-VSR is not bundled in this public release because the current upstream repository does not contain the licence file named by its README. AniScale will not redistribute that checkpoint until applicable permission is published or supplied.
 
-          ### Premium monochrome interface
+          ### Existing engines
 
-          - New black-and-white command bar matching the supplied visual direction.
-          - Functional Video, Image, Upscale, Ask AI, attachment, send, model, controls, and navigation actions.
-          - Touch-positioned specular highlights now move under the user's finger across glass surfaces on Android and iOS.
-          - Assistant header, API-key field, conversation bubbles, attachment control, and composer use the same premium glass language.
-
-          ### AniUltraScale developer foundation
-
-          - Native 2×, five-frame recurrent video-super-resolution architecture with forward and backward temporal propagation.
-          - Separate fidelity and detail residual controls, with FAST and QUALITY training configurations.
-          - Crisp-detail objectives using edge, frequency, local-contrast, and multi-scale Laplacian losses rather than targeting the softer Real-ESRGAN appearance.
-          - Temporal supervision to reduce flicker and keep recovered detail stable between frames.
-          - Licence-audited training-media acquisition, real-video degradation, guarded export, and validation tooling.
-          - **Status:** AniUltraScale remains explicitly Experimental with deterministic untrained weights; it is not a production checkpoint.
-
-          ### AniUltraScale Experimental
-
-          - A separate, explicitly untrained AniUltraScale runtime is selectable for video architecture testing.
-          - It uses deterministic random initialization and is labelled Experimental throughout the app.
-          - Noisy, corrupted, or unusable output is expected; this is not the trained production checkpoint.
-          - The normal Fusion, Render, and Turbo engines remain available for usable output.
-
-          ### Video engines
-
-          - **AniScale Fusion** — anime and stylized 3D; the quality-first default.
-          - **AniScale Render** — fully rendered 3D and CGI; stronger texture and edge recovery.
-          - **AniScale Turbo** — compact anime-video models with native 2× and 4× paths for faster, cooler processing.
-
-          ### Android
-
-          - Only the selected model is kept in memory, preventing the previous Fusion failure on memory-constrained devices.
-          - FP16 Vulkan acceleration is enabled where supported, with a bounded CPU fallback.
-          - Turbo uses larger automatic GPU tiles and native 2×/4× models.
-          - Video uses engine-specific AI working resolutions, native YUV conversion, edge refinement, full encoder-safe export dimensions, and original-audio remuxing.
-          - Fusion, Render, and Turbo are selectable for images as well as video.
-
-          ### Interface and history
-
-          - Shared premium monochrome glass styling and edge-to-edge layout on Android and iOS.
-          - Image and video history persists across launches.
-          - History entries can be filtered, reopened, played, shared, saved, or deleted.
-          - Settings, About, model information, licences, and clear-history controls are functional.
-
-          ### iPhone
-
-          - Fusion, Render, and Turbo are bundled as Core ML models.
-          - The IPA is unsigned and must be signed with your own Apple ID/certificate before installation.
+          Fusion, Render, Turbo, and SuperUltra remain available. HEVC/H.264 output, original-audio remuxing, encoder-safe 4K fitting, local history, progress, cancellation, and the premium monochrome interface remain intact.
 
           ### Privacy
 

@@ -34,7 +34,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
   private lazy var fusionModel = loadModel(named: "RealESRGAN_anime_6B_266_fp16")
   private lazy var renderModel = loadModel(named: "RealESRGAN_render_x4plus_266_fp16")
   private lazy var turboModel = loadModel(named: "AniScale_turbo_animevideo_266_fp16")
-  private lazy var ultraModel = loadModel(named: "AniUltraScale_experimental_2x")
+  private lazy var animeUltraModel = loadModel(named: "AniUltraAnime_v2_recurrent")
   private lazy var superUltra2xModel = loadModel(named: "SuperUltra_span_x2_fp16")
   private lazy var superUltra4xModel = loadModel(named: "SuperUltra_span_x4_fp16")
   private lazy var superUltraAnime2xModel = loadModel(named: "SuperUltra_span_anime_x2_fp16")
@@ -111,7 +111,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         let content = arguments["content"] as? String ?? "auto"
         let detailMode = arguments["detailMode"] as? String ?? "natural"
         let codec = arguments["codec"] as? String ?? "hevc"
-        guard engine == "fusion" || engine == "render" || engine == "turbo" || engine == "clean" || engine == "ultra" || engine == "superUltra",
+        guard engine == "fusion" || engine == "render" || engine == "turbo" || engine == "superUltra" || engine == "animeUltra",
               [1.5, 2.0, 3.0, 4.0].contains(targetScale),
               ["auto", "live", "anime"].contains(content),
               ["natural", "detailed", "sharp"].contains(detailMode),
@@ -434,16 +434,16 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       : (engine == "render" ? renderModel : (engine == "turbo" ? turboModel : fusionModel))
     let engineLabel = engine == "render"
       ? "AniScale Render"
-      : (engine == "turbo" ? "AniScale Turbo" : (engine == "clean" ? "AniScale Clean" : (engine == "ultra" ? "AniUltraScale Experimental" : (engine == "superUltra" ? "SuperUltra" : "AniScale Fusion"))))
+      : (engine == "turbo" ? "AniScale Turbo" : (engine == "animeUltra" ? "AniUltraAnime" : (engine == "superUltra" ? "SuperUltra" : "AniScale Fusion")))
     let videoDenoise = engine == "superUltra"
       ? (content == "anime" ? 0.08 : 0.04)
-      : (engine == "render" ? 0.34 : (engine == "clean" ? 0.30 : (engine == "turbo" ? 0.16 : 0.2)))
+      : (engine == "render" ? 0.34 : (engine == "turbo" ? 0.16 : 0.2))
     let videoSharpness = engine == "superUltra"
       ? (detailMode == "sharp" ? 0.55 : (detailMode == "detailed" ? 0.28 : 0.0))
-      : (engine == "render" ? 0.34 : (engine == "clean" ? 0.24 : (engine == "turbo" ? 0.2 : 0.26)))
+      : (engine == "render" ? 0.34 : (engine == "turbo" ? 0.2 : 0.26))
     let videoDetail = engine == "superUltra"
       ? (detailMode == "sharp" ? 0.82 : (detailMode == "detailed" ? 0.68 : 0.52))
-      : (engine == "render" ? 0.68 : (engine == "clean" ? 0.56 : (engine == "turbo" ? 0.48 : 0.6)))
+      : (engine == "render" ? 0.68 : (engine == "turbo" ? 0.48 : 0.6))
     let sourceURL = URL(fileURLWithPath: path)
     let asset = AVAsset(url: sourceURL)
     guard let videoTrack = asset.tracks(withMediaType: .video).first else {
@@ -525,14 +525,17 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     writer.startSession(atSourceTime: .zero)
 
     let ciContext = CIContext(options: [.useSoftwareRenderer: false])
-    while let sample = readerOutput.copyNextSampleBuffer() {
+    let animeState = AnimeCoreMLState()
+    var previousAnimeFrame: CGImage?
+    var currentSample = readerOutput.copyNextSampleBuffer()
+    var nextAnimeSample = engine == "animeUltra" ? readerOutput.copyNextSampleBuffer() : nil
+    while let sample = currentSample {
       if isCancelled() {
         reader.cancelReading()
         writer.cancelWriting()
         try? FileManager.default.removeItem(at: silentURL)
         throw EngineError("cancelled", "Video upscaling was cancelled.")
       }
-      guard let inputBuffer = CMSampleBufferGetImageBuffer(sample) else { continue }
       while !writerInput.isReadyForMoreMediaData {
         if isCancelled() { break }
         Thread.sleep(forTimeInterval: 0.004)
@@ -555,48 +558,44 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         durationSeconds * Double(max(videoTrack.nominalFrameRate, 1))
       )
       try autoreleasepool {
-        var frame = CIImage(cvPixelBuffer: inputBuffer).transformed(by: videoTrack.preferredTransform)
-        frame = frame.transformed(
-          by: CGAffineTransform(translationX: -frame.extent.minX, y: -frame.extent.minY)
+        let frameLimit: CGFloat? = engine == "animeUltra"
+          ? CGFloat(efficient ? 240 : 320)
+          : (efficient ? 960 : nil)
+        let frameImage = try preparedVideoFrame(
+          sample,
+          track: videoTrack,
+          context: ciContext,
+          longestEdgeLimit: frameLimit
         )
-        if efficient {
-          let longestEdge = max(frame.extent.width, frame.extent.height)
-          if longestEdge > 960 {
-            frame = frame.applyingFilter(
-              "CILanczosScaleTransform",
-              parameters: [
-                kCIInputScaleKey: 960 / longestEdge,
-                kCIInputAspectRatioKey: 1.0
-              ]
-            )
-          }
-        }
-        if engine == "clean" {
-          frame = cleanupFrame(frame).cropped(to: frame.extent)
-        }
-        guard let frameImage = ciContext.createCGImage(frame, from: frame.extent) else {
-          throw EngineError(
-            "video_frame_decode",
-            "A video frame could not be decoded for AI processing."
-          )
-        }
-        let frameWidth = Int(frame.extent.width.rounded())
+        let frameWidth = frameImage.width
         let aiScale = engine == "superUltra"
           ? superUltraNativeScale
           : (outputWidth >= frameWidth * 3 ? 4 : 2)
         let enhancedImage: CGImage
-        if engine == "ultra" {
+        if engine == "animeUltra" {
+          let nextFrame = try nextAnimeSample.map {
+            try preparedVideoFrame(
+              $0,
+              track: videoTrack,
+              context: ciContext,
+              longestEdgeLimit: frameLimit
+            )
+          } ?? frameImage
+          let previousFrame = previousAnimeFrame ?? frameImage
+          if previousAnimeFrame != nil && isSceneCut(previousFrame, frameImage) {
+            animeState.reset()
+          }
           let inferenceStarted = ProcessInfo.processInfo.systemUptime
-          enhancedImage = try upscaleUltraExperimental(UIImage(cgImage: frameImage))
+          enhancedImage = try upscaleAnime(
+            previous: previousFrame,
+            current: frameImage,
+            next: nextFrame,
+            state: animeState
+          )
+          previousAnimeFrame = frameImage
           tileInferenceMilliseconds.append(
             (ProcessInfo.processInfo.systemUptime - inferenceStarted) * 1_000
           )
-          emitProgress(min(0.92, frameStart + frameStep))
-        } else if engine == "clean" {
-          // Do not feed patterned footage into a generative SR model: it can
-          // turn residual scanlines into stronger false detail. Clean uses the
-          // restored frame and the final Lanczos fit below.
-          enhancedImage = frameImage
           emitProgress(min(0.92, frameStart + frameStep))
         } else {
           let enhanced = try upscale(
@@ -648,6 +647,12 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       }
       emitProgress(min(0.92, max(0.01, CMTimeGetSeconds(timestamp) / durationSeconds * 0.92)))
       throttleForThermalState()
+      if engine == "animeUltra" {
+        currentSample = nextAnimeSample
+        nextAnimeSample = readerOutput.copyNextSampleBuffer()
+      } else {
+        currentSample = readerOutput.copyNextSampleBuffer()
+      }
     }
 
     writerInput.markAsFinished()
@@ -693,120 +698,204 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       ],
       "engine": engine == "superUltra"
         ? "SuperUltra — \(content.capitalized), \(detailMode.capitalized) (Core ML/Metal)"
-        : (efficient
-          ? "\(engineLabel) (Efficient Core ML)"
-          : "\(engineLabel) (Maximum Core ML)")
+        : (engine == "animeUltra"
+          ? "AniUltraAnime — AnimeSR_v2 recurrent (Core ML/Metal)"
+          : (efficient
+            ? "\(engineLabel) (Efficient Core ML)"
+            : "\(engineLabel) (Maximum Core ML)"))
     ]
   }
 
-  /// Lightweight mobile restoration used before Fusion. The desktop
-  /// VideoDemoireing/BasicVSR++ projects are training teachers; this path uses
-  /// Core Image so it remains deployable and hardware accelerated on iPhone.
-  private func cleanupFrame(_ image: CIImage) -> CIImage {
-    let extent = image.extent
-    let balanced = image.applyingFilter(
-      "CIColorMatrix",
-      parameters: [
-        "inputRVector": CIVector(x: 1.13, y: 0, z: 0, w: 0),
-        "inputGVector": CIVector(x: 0, y: 0.76, z: 0, w: 0),
-        "inputBVector": CIVector(x: 0, y: 0, z: 1.15, w: 0),
-        "inputBiasVector": CIVector(x: 0.012, y: 0, z: 0.014, w: 0)
-      ]
-    )
-    let cleaned = balanced.applyingFilter(
-      "CINoiseReduction",
-      parameters: ["inputNoiseLevel": 0.055, "inputSharpness": 0.12]
-    )
-    // A sub-pixel vertical blur suppresses fine horizontal scanline energy;
-    // controlled luminance sharpening restores edges without strong halos.
-    return cleaned
-      .applyingFilter("CIMedianFilter")
-      .cropped(to: extent)
-      .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 1.8])
-      .cropped(to: extent)
-      .applyingFilter(
-        "CISharpenLuminance",
-        parameters: [kCIInputSharpnessKey: 0.08, "inputRadius": 1.0]
-      )
-      .applyingFilter(
-        "CIColorControls",
-        parameters: [kCIInputContrastKey: 1.03, kCIInputSaturationKey: 0.78]
-      )
+  private final class AnimeCoreMLState {
+    var width = 0
+    var height = 0
+    var feedback: MLMultiArray?
+    var hidden: MLMultiArray?
+
+    func reset() {
+      feedback = nil
+      hidden = nil
+    }
   }
 
-  private func upscaleUltraExperimental(_ image: UIImage) throws -> CGImage {
-    let inputWidth = 320
-    let inputHeight = 180
-    let outputWidth = inputWidth * 2
-    let outputHeight = inputHeight * 2
-    let format = UIGraphicsImageRendererFormat.default()
-    format.scale = 1
-    format.opaque = true
-    let resized = UIGraphicsImageRenderer(
-      size: CGSize(width: inputWidth, height: inputHeight),
-      format: format
-    ).image { _ in
-      image.draw(in: CGRect(x: 0, y: 0, width: inputWidth, height: inputHeight))
+  private func preparedVideoFrame(
+    _ sample: CMSampleBuffer,
+    track: AVAssetTrack,
+    context: CIContext,
+    longestEdgeLimit: CGFloat?
+  ) throws -> CGImage {
+    guard let buffer = CMSampleBufferGetImageBuffer(sample) else {
+      throw EngineError("video_frame_decode", "A video frame could not be decoded.")
     }
-    guard let source = normalizedRGBA(resized) else {
-      throw EngineError("ultra_decode", "AniUltraScale could not prepare this frame.")
-    }
-    let frames = try MLMultiArray(
-      shape: [1, 5, 3, NSNumber(value: inputHeight), NSNumber(value: inputWidth)],
-      dataType: .float32
+    var frame = CIImage(cvPixelBuffer: buffer).transformed(by: track.preferredTransform)
+    frame = frame.transformed(
+      by: CGAffineTransform(translationX: -frame.extent.minX, y: -frame.extent.minY)
     )
-    let pointer = frames.dataPointer.bindMemory(
-      to: Float32.self,
-      capacity: 5 * 3 * inputWidth * inputHeight
-    )
-    let plane = inputWidth * inputHeight
-    for frame in 0..<5 {
-      let frameOffset = frame * 3 * plane
-      for index in 0..<plane {
-        let pixel = index * 4
-        pointer[frameOffset + index] = Float32(source.pixels[pixel]) / 255
-        pointer[frameOffset + plane + index] = Float32(source.pixels[pixel + 1]) / 255
-        pointer[frameOffset + 2 * plane + index] = Float32(source.pixels[pixel + 2]) / 255
+    if let longestEdgeLimit {
+      let longestEdge = max(frame.extent.width, frame.extent.height)
+      if longestEdge > longestEdgeLimit {
+        frame = frame.applyingFilter(
+          "CILanczosScaleTransform",
+          parameters: [
+            kCIInputScaleKey: longestEdgeLimit / longestEdge,
+            kCIInputAspectRatioKey: 1.0
+          ]
+        )
       }
     }
-    let controls = try MLMultiArray(shape: [1, 2], dataType: .float32)
-    let controlPointer = controls.dataPointer.bindMemory(to: Float32.self, capacity: 2)
-    controlPointer[0] = 1
-    controlPointer[1] = 0.82
-    let provider = try MLDictionaryFeatureProvider(
-      dictionary: ["frames": frames, "controls": controls]
-    )
-    let prediction = try ultraModel.prediction(from: provider)
-    guard
-      let output = prediction.featureValue(for: "output")?.multiArrayValue,
-      output.dataType == .float32,
-      output.shape.map({ $0.intValue }) == [1, 3, outputHeight, outputWidth]
-    else {
-      throw EngineError("ultra_output", "AniUltraScale returned an invalid tensor.")
+    let width = max(32, (Int(frame.extent.width.rounded()) / 4) * 4)
+    let height = max(32, (Int(frame.extent.height.rounded()) / 4) * 4)
+    if Int(frame.extent.width.rounded()) != width || Int(frame.extent.height.rounded()) != height {
+      frame = frame.cropped(to: CGRect(x: 0, y: 0, width: width, height: height))
     }
-    let outputPointer = output.dataPointer.bindMemory(
-      to: Float32.self,
-      capacity: 3 * outputWidth * outputHeight
+    guard let image = context.createCGImage(frame, from: frame.extent) else {
+      throw EngineError("video_frame_decode", "A video frame could not be prepared for AI processing.")
+    }
+    return image
+  }
+
+  private func upscaleAnime(
+    previous: CGImage,
+    current: CGImage,
+    next: CGImage,
+    state: AnimeCoreMLState
+  ) throws -> CGImage {
+    let width = current.width
+    let height = current.height
+    let outputWidth = width * 4
+    let outputHeight = height * 4
+    if state.width != width || state.height != height {
+      state.width = width
+      state.height = height
+      state.reset()
+    }
+    let frames = try MLMultiArray(
+      shape: [1, 9, NSNumber(value: height), NSNumber(value: width)],
+      dataType: .float32
     )
-    var pixels = [UInt8](repeating: 255, count: outputWidth * outputHeight * 4)
-    let outputPlane = outputWidth * outputHeight
-    for index in 0..<outputPlane {
-      pixels[index * 4] = byte(outputPointer[index])
-      pixels[index * 4 + 1] = byte(outputPointer[outputPlane + index])
-      pixels[index * 4 + 2] = byte(outputPointer[2 * outputPlane + index])
+    try fillAnimeFrames(frames, images: [previous, current, next])
+    let feedback: MLMultiArray
+    if let existingFeedback = state.feedback {
+      feedback = existingFeedback
+    } else {
+      feedback = try zeroArray(
+        shape: [1, 3, NSNumber(value: outputHeight), NSNumber(value: outputWidth)]
+      )
+    }
+    let hidden: MLMultiArray
+    if let existingHidden = state.hidden {
+      hidden = existingHidden
+    } else {
+      hidden = try zeroArray(
+        shape: [1, 64, NSNumber(value: height), NSNumber(value: width)]
+      )
+    }
+    let provider = try MLDictionaryFeatureProvider(
+      dictionary: ["frames": frames, "feedback": feedback, "state": hidden]
+    )
+    let prediction = try animeUltraModel.prediction(from: provider)
+    guard
+      let enhanced = prediction.featureValue(for: "enhanced")?.multiArrayValue,
+      let nextState = prediction.featureValue(for: "next_state")?.multiArrayValue,
+      enhanced.dataType == .float32,
+      nextState.dataType == .float32,
+      enhanced.shape.map({ $0.intValue }) == [1, 3, outputHeight, outputWidth],
+      nextState.shape.map({ $0.intValue }) == [1, 64, height, width]
+    else {
+      throw EngineError("anime_output", "AnimeSR_v2 returned an invalid recurrent state.")
+    }
+    state.feedback = enhanced
+    state.hidden = nextState
+    return try imageFromAnimeOutput(enhanced, width: outputWidth, height: outputHeight)
+  }
+
+  private func zeroArray(shape: [NSNumber]) throws -> MLMultiArray {
+    let array = try MLMultiArray(shape: shape, dataType: .float32)
+    memset(array.dataPointer, 0, array.count * MemoryLayout<Float32>.size)
+    return array
+  }
+
+  private func fillAnimeFrames(_ array: MLMultiArray, images: [CGImage]) throws {
+    let height = array.shape[2].intValue
+    let width = array.shape[3].intValue
+    let channelStride = array.strides[1].intValue
+    let rowStride = array.strides[2].intValue
+    let columnStride = array.strides[3].intValue
+    let pointer = array.dataPointer.bindMemory(to: Float32.self, capacity: array.count)
+    for (frameIndex, image) in images.enumerated() {
+      guard image.width == width, image.height == height,
+            let pixels = normalizedRGBA(UIImage(cgImage: image)) else {
+        throw EngineError("anime_input", "AnimeSR_v2 received mismatched video frames.")
+      }
+      for y in 0..<height {
+        for x in 0..<width {
+          let sourceIndex = (y * width + x) * 4
+          let destination = y * rowStride + x * columnStride
+          for channel in 0..<3 {
+            pointer[(frameIndex * 3 + channel) * channelStride + destination] =
+              Float32(pixels.pixels[sourceIndex + channel]) / 255
+          }
+        }
+      }
+    }
+  }
+
+  private func imageFromAnimeOutput(
+    _ output: MLMultiArray,
+    width: Int,
+    height: Int
+  ) throws -> CGImage {
+    let channelStride = output.strides[1].intValue
+    let rowStride = output.strides[2].intValue
+    let columnStride = output.strides[3].intValue
+    let pointer = output.dataPointer.bindMemory(to: Float32.self, capacity: output.count)
+    var pixels = [UInt8](repeating: 255, count: width * height * 4)
+    for y in 0..<height {
+      for x in 0..<width {
+        let destination = (y * width + x) * 4
+        let source = y * rowStride + x * columnStride
+        pixels[destination] = byte(pointer[source])
+        pixels[destination + 1] = byte(pointer[channelStride + source])
+        pixels[destination + 2] = byte(pointer[2 * channelStride + source])
+      }
     }
     guard let context = CGContext(
       data: &pixels,
-      width: outputWidth,
-      height: outputHeight,
+      width: width,
+      height: height,
       bitsPerComponent: 8,
-      bytesPerRow: outputWidth * 4,
+      bytesPerRow: width * 4,
       space: CGColorSpaceCreateDeviceRGB(),
       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-    ), let result = context.makeImage() else {
-      throw EngineError("ultra_encode", "AniUltraScale could not assemble its frame.")
+    ), let image = context.makeImage() else {
+      throw EngineError("anime_encode", "AniUltraAnime could not assemble its frame.")
     }
-    return result
+    return image
+  }
+
+  private func isSceneCut(_ previous: CGImage, _ current: CGImage) -> Bool {
+    guard let first = normalizedRGBA(UIImage(cgImage: previous)),
+          let second = normalizedRGBA(UIImage(cgImage: current)),
+          first.width == second.width,
+          first.height == second.height else { return true }
+    let stepX = max(1, first.width / 32)
+    let stepY = max(1, first.height / 18)
+    var difference = 0.0
+    var samples = 0
+    for y in stride(from: 0, to: first.height, by: stepY) {
+      for x in stride(from: 0, to: first.width, by: stepX) {
+        let index = (y * first.width + x) * 4
+        let firstLuma = 0.2126 * Double(first.pixels[index])
+          + 0.7152 * Double(first.pixels[index + 1])
+          + 0.0722 * Double(first.pixels[index + 2])
+        let secondLuma = 0.2126 * Double(second.pixels[index])
+          + 0.7152 * Double(second.pixels[index + 1])
+          + 0.0722 * Double(second.pixels[index + 2])
+        difference += abs(firstLuma - secondLuma) / 255
+        samples += 1
+      }
+    }
+    return samples > 0 && difference / Double(samples) > 0.28
   }
 
   private func percentile(_ values: [Double], _ fraction: Double) -> Double {

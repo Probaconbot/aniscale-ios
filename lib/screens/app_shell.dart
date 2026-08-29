@@ -282,7 +282,7 @@ class VideoSelectedScreen extends StatefulWidget {
   State<VideoSelectedScreen> createState() => _VideoSelectedScreenState();
 }
 
-enum _VideoEngine { fusion, render, turbo, clean, ultra, superUltra }
+enum _VideoEngine { fusion, render, turbo, superUltra, animeUltra }
 
 class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
   int _scale = 2;
@@ -383,9 +383,8 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                         _VideoEngine.fusion => 'Fusion',
                         _VideoEngine.render => 'Render',
                         _VideoEngine.turbo => 'Turbo',
-                        _VideoEngine.clean => 'Clean',
-                        _VideoEngine.ultra => 'Ultra',
                         _VideoEngine.superUltra => 'Super',
+                        _VideoEngine.animeUltra => 'Anime VSR',
                       },
                     )
                     .toList(),
@@ -403,9 +402,8 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                   _VideoEngine.fusion => 'AniScale Fusion — tuned for anime and stylized 3D with strong, faithful detail.',
                   _VideoEngine.render => 'AniScale Render — a heavier 23-block model for clean 3D surfaces, sharper geometry, and restrained noise.',
                   _VideoEngine.turbo => 'AniScale Turbo — a compact video model for faster processing and lower heat.',
-                  _VideoEngine.clean => 'AniScale Clean — removes green cast, scanlines, moiré, chroma noise, blur, and compression without generative detail amplification.',
-                  _VideoEngine.ultra => 'AniUltraScale Experimental — the real temporal VSR architecture with untrained weights. Noisy or corrupted output is expected.',
                   _VideoEngine.superUltra => 'SuperUltra — offline SPAN restoration with native mobile acceleration and no temporary frame files.',
+                  _VideoEngine.animeUltra => 'AniUltraAnime — official AnimeSR_v2 with neighboring frames, persistent recurrent state, and automatic scene-cut reset.',
                 },
                 textAlign: TextAlign.center,
                 style: const TextStyle(
@@ -417,6 +415,8 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
               ControlLabel(
                 _engine == _VideoEngine.superUltra
                     ? 'SUPERULTRA SCALE'
+                    : _engine == _VideoEngine.animeUltra
+                    ? 'ANIME UPSCALE'
                     : 'VIDEO UPSCALE',
               ),
               const SizedBox(height: 9),
@@ -494,15 +494,13 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                     _VideoEngine.fusion => 'AniScale Fusion — Anime & 3D',
                     _VideoEngine.render => 'AniScale Render — 3D',
                     _VideoEngine.turbo => 'AniScale Turbo — Fast',
-                    _VideoEngine.clean => 'AniScale Clean — Restore',
-                    _VideoEngine.ultra => 'AniUltraScale — Experimental',
                     _VideoEngine.superUltra => 'SuperUltra — Offline SPAN',
+                    _VideoEngine.animeUltra => 'AniUltraAnime — AnimeSR_v2',
                   }),
                   subtitle: Text(
                     '${switch (_engine) {
-                      _VideoEngine.ultra => Platform.isIOS ? 'Core ML experimental VSR' : 'ONNX Runtime experimental VSR',
                       _VideoEngine.superUltra => Platform.isIOS ? 'Core ML/Metal FP16' : 'ncnn Vulkan FP16',
-                      _VideoEngine.clean => Platform.isIOS ? 'Core Image restoration + Lanczos' : 'Native restoration + Lanczos',
+                      _VideoEngine.animeUltra => Platform.isIOS ? 'Core ML recurrent VSR' : 'ONNX Runtime recurrent VSR',
                       _ => Platform.isIOS ? 'Core ML' : 'ncnn Vulkan',
                     }} processes locally. Original audio is preserved and oversized results fit a safe 4K output.',
                   ),
@@ -1128,9 +1126,8 @@ class _EditorScreenState extends State<EditorScreen> {
                   _VideoEngine.render => 'Photos, CGI, and rendered textures with restrained cleanup.',
                   _VideoEngine.turbo =>
                     'Compact 2×/4× model for the fastest, coolest result.',
-                  _VideoEngine.clean => 'Video-only patterned-footage cleanup; choose another engine for images.',
-                  _VideoEngine.ultra => 'Video-only experimental engine; choose another engine for images.',
                   _VideoEngine.superUltra => 'Video-only offline SPAN engine; choose another engine for images.',
+                  _VideoEngine.animeUltra => 'Video-only recurrent AnimeSR_v2 engine; choose another engine for images.',
                 },
                 textAlign: TextAlign.center,
                 style: const TextStyle(
@@ -2480,9 +2477,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 icon: Icons.memory_rounded,
                 title: 'Upscale engine',
                 value: Platform.isIOS
-                    ? 'Fusion + Render + Turbo + SuperUltra + AniUltraScale Experimental'
+                    ? 'Fusion + Render + Turbo + SuperUltra + AniUltraAnime'
                     : Platform.isAndroid
-                    ? 'Fusion + Render + Turbo + SuperUltra + AniUltraScale Experimental'
+                    ? 'Fusion + Render + Turbo + SuperUltra + AniUltraAnime'
                     : 'Mobile resampler',
                 onTap: () => showModalBottomSheet<void>(
                   context: context,
@@ -2512,11 +2509,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           SizedBox(height: 8),
                           Text(
-                            'Clean — non-generative pattern, color-cast, noise, blur, and compression restoration.',
-                          ),
-                          SizedBox(height: 8),
-                          Text(
-                            'AniUltraScale — untrained temporal VSR experiment; noisy output expected.',
+                            'AniUltraAnime — official AnimeSR_v2 recurrent anime-video restoration with neighboring-frame context and scene-cut state reset.',
                           ),
                         ],
                       ),
