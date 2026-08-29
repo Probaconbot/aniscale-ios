@@ -1,6 +1,9 @@
 name: Build AniScale mobile releases
 
 on:
+  push:
+    branches:
+      - codex/cda-vsr-private-test
   workflow_dispatch:
     inputs:
       private_test:
@@ -225,7 +228,7 @@ jobs:
           unzip -t AniScale-unsigned.ipa
 
       - name: Upload AniScale IPA
-        if: ${{ !inputs.private_test }}
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.private_test }}
         uses: actions/upload-artifact@v4
         with:
           name: AniScale-unsigned-ipa
@@ -291,7 +294,7 @@ jobs:
         run: flutter build apk --release
 
       - name: Upload AniScale APK
-        if: ${{ !inputs.private_test }}
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.private_test }}
         uses: actions/upload-artifact@v4
         with:
           name: AniScale-android-apk
@@ -300,11 +303,11 @@ jobs:
           retention-days: 14
 
       - name: Create unpublished private test draft
-        if: ${{ inputs.private_test }}
+        if: ${{ github.event_name == 'push' || inputs.private_test }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TEST_VERSION: ${{ inputs.version }}
+          TEST_VERSION: ${{ inputs.version || '1.15.0-cda-test.1' }}
         run: |
           set -euo pipefail
           test -n "$TEST_VERSION"
