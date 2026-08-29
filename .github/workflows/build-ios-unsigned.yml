@@ -89,7 +89,7 @@ jobs:
             -O "$RUNNER_TEMP/animesr-weights"
           ANIME_CHECKPOINT="$(find "$RUNNER_TEMP/animesr-weights" -type f -name 'AnimeSR_v2.pth' -print -quit)"
           test -n "$ANIME_CHECKPOINT"
-          shasum -a 256 "$ANIME_CHECKPOINT"
+          echo "d0f29c8966b53718828bd424bbdc306e7ff0cbf6350beadaf8b5b2500b108548  $ANIME_CHECKPOINT" | shasum -a 256 -c -
           python tools/convert_animesr_mobile.py \
             --checkpoint "$ANIME_CHECKPOINT" \
             --output build/aniultraanime

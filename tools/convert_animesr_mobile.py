@@ -93,6 +93,14 @@ class AnimeSRCell(nn.Module):
         self.lrelu = nn.LeakyReLU(0.1)
         self.pixel_shuffle = nn.PixelShuffle(4)
 
+    @staticmethod
+    def pixel_unshuffle_x4(value: torch.Tensor) -> torch.Tensor:
+        """Core ML iOS 15-compatible equivalent of pixel_unshuffle(value, 4)."""
+        return torch.cat(
+            [value[:, :, row::4, column::4] for row in range(4) for column in range(4)],
+            dim=1,
+        )
+
     def forward(
         self,
         frames: torch.Tensor,
@@ -100,7 +108,7 @@ class AnimeSRCell(nn.Module):
         state: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         current = frames[:, 3:6]
-        input_value = torch.cat((frames, functional.pixel_unshuffle(feedback, 4), state), dim=1)
+        input_value = torch.cat((frames, self.pixel_unshuffle_x4(feedback), state), dim=1)
         output = self.recurrent_cell(input_value)
         enhanced = self.pixel_shuffle(output[:, :48]) + functional.interpolate(
             current,
