@@ -19,6 +19,10 @@
 		A11CA2012F52000100A11CA1 /* SuperUltra_span_x2_fp16.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = A11CA2042F52000100A11CA1 /* SuperUltra_span_x2_fp16.mlpackage */; };
 		A11CA2022F52000100A11CA1 /* SuperUltra_span_x4_fp16.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = A11CA2052F52000100A11CA1 /* SuperUltra_span_x4_fp16.mlpackage */; };
 		A11CA2032F52000100A11CA1 /* SuperUltra_span_anime_x2_fp16.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = A11CA2062F52000100A11CA1 /* SuperUltra_span_anime_x2_fp16.mlpackage */; };
+		CDA000012F53000100CDA001 /* CDAEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDA000022F53000100CDA001 /* CDAEngine.swift */; };
+		CDA000032F53000100CDA001 /* AniRealism_cda_vsr_initializer.onnx in Resources */ = {isa = PBXBuildFile; fileRef = CDA000042F53000100CDA001 /* AniRealism_cda_vsr_initializer.onnx */; };
+		CDA000052F53000100CDA001 /* AniRealism_cda_vsr_recurrent.onnx in Resources */ = {isa = PBXBuildFile; fileRef = CDA000062F53000100CDA001 /* AniRealism_cda_vsr_recurrent.onnx */; };
+		CDA000072F53000100CDA001 /* onnxruntime in Frameworks */ = {isa = PBXBuildFile; productRef = CDA000082F53000100CDA001 /* onnxruntime */; };
 		7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */; };
 		78A318202AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage in Frameworks */ = {isa = PBXBuildFile; productRef = 78A3181F2AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage */; };
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
@@ -65,6 +69,9 @@
 		A11CA2042F52000100A11CA1 /* SuperUltra_span_x2_fp16.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = SuperUltra_span_x2_fp16.mlpackage; sourceTree = "<group>"; };
 		A11CA2052F52000100A11CA1 /* SuperUltra_span_x4_fp16.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = SuperUltra_span_x4_fp16.mlpackage; sourceTree = "<group>"; };
 		A11CA2062F52000100A11CA1 /* SuperUltra_span_anime_x2_fp16.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = SuperUltra_span_anime_x2_fp16.mlpackage; sourceTree = "<group>"; };
+		CDA000022F53000100CDA001 /* CDAEngine.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CDAEngine.swift; sourceTree = "<group>"; };
+		CDA000042F53000100CDA001 /* AniRealism_cda_vsr_initializer.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; path = AniRealism_cda_vsr_initializer.onnx; sourceTree = "<group>"; };
+		CDA000062F53000100CDA001 /* AniRealism_cda_vsr_recurrent.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; path = AniRealism_cda_vsr_recurrent.onnx; sourceTree = "<group>"; };
 		7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		78E0A7A72DC9AD7400C4905E /* FlutterGeneratedPluginSwiftPackage */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = FlutterGeneratedPluginSwiftPackage; path = Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage; sourceTree = "<group>"; };
 		7AFA3C8E1D35360C0083082E /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Release.xcconfig; path = Flutter/Release.xcconfig; sourceTree = "<group>"; };
@@ -82,6 +89,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CDA000072F53000100CDA001 /* onnxruntime in Frameworks */,
 				78A318202AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -139,6 +147,7 @@
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				A11CA1DF2F51000100A11CA1 /* UpscaleEngine.swift */,
+				CDA000022F53000100CDA001 /* CDAEngine.swift */,
 				A11CA1E32F51000100A11CA1 /* Models */,
 				7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
@@ -156,6 +165,8 @@
 				A11CA2042F52000100A11CA1 /* SuperUltra_span_x2_fp16.mlpackage */,
 				A11CA2052F52000100A11CA1 /* SuperUltra_span_x4_fp16.mlpackage */,
 				A11CA2062F52000100A11CA1 /* SuperUltra_span_anime_x2_fp16.mlpackage */,
+				CDA000042F53000100CDA001 /* AniRealism_cda_vsr_initializer.onnx */,
+				CDA000062F53000100CDA001 /* AniRealism_cda_vsr_recurrent.onnx */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -198,6 +209,7 @@
 			name = Runner;
 			packageProductDependencies = (
 				78A3181F2AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage */,
+				CDA000082F53000100CDA001 /* onnxruntime */,
 			);
 			productName = Runner;
 			productReference = 97C146EE1CF9000F007C117D /* Runner.app */;
@@ -234,6 +246,7 @@
 			mainGroup = 97C146E51CF9000F007C117D;
 			packageReferences = (
 				781AD8BC2B33823900A9FFBB /* XCLocalSwiftPackageReference "Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage" */,
+				CDA000092F53000100CDA001 /* XCRemoteSwiftPackageReference "onnxruntime-swift-package-manager" */,
 			);
 			productRefGroup = 97C146EF1CF9000F007C117D /* Products */;
 			projectDirPath = "";
@@ -257,6 +270,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CDA000032F53000100CDA001 /* AniRealism_cda_vsr_initializer.onnx in Resources */,
+				CDA000052F53000100CDA001 /* AniRealism_cda_vsr_recurrent.onnx in Resources */,
 				A11CA1E22F51000100A11CA1 /* RealESRGAN_anime_6B_266_fp16.mlpackage in Resources */,
 				A11CA1E52F51000100A11CA1 /* RealESRGAN_render_x4plus_266_fp16.mlpackage in Resources */,
 				A11CA1E72F51000100A11CA1 /* AniScale_turbo_animevideo_266_fp16.mlpackage in Resources */,
@@ -320,6 +335,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CDA000012F53000100CDA001 /* CDAEngine.swift in Sources */,
 				A11CA1E02F51000100A11CA1 /* UpscaleEngine.swift in Sources */,
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
@@ -676,10 +692,26 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		CDA000092F53000100CDA001 /* XCRemoteSwiftPackageReference "onnxruntime-swift-package-manager" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/microsoft/onnxruntime-swift-package-manager";
+			requirement = {
+				kind = exactVersion;
+				version = 1.24.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		78A3181F2AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = FlutterGeneratedPluginSwiftPackage;
+		};
+		CDA000082F53000100CDA001 /* onnxruntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CDA000092F53000100CDA001 /* XCRemoteSwiftPackageReference "onnxruntime-swift-package-manager" */;
+			productName = onnxruntime;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

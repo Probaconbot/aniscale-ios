@@ -77,6 +77,21 @@ class MainActivity : FlutterActivity() {
         }
         animeEnvironment.createSession(model, options)
     }
+    private fun cdaSession(assetName: String): OrtSession {
+        val options = OrtSession.SessionOptions().apply {
+            setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+            setIntraOpNumThreads(2)
+            setInterOpNumThreads(1)
+        }
+        val model = assets.open("models/$assetName").use { it.readBytes() }
+        return animeEnvironment.createSession(model, options)
+    }
+    private val cdaInitializerSession by lazy {
+        cdaSession("AniRealism_cda_vsr_initializer.onnx")
+    }
+    private val cdaRecurrentSession by lazy {
+        cdaSession("AniRealism_cda_vsr_recurrent.onnx")
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -213,7 +228,7 @@ class MainActivity : FlutterActivity() {
         val codec = call.argument<String>("codec") ?: "hevc"
         if (path.isNullOrBlank() || scale !in listOf(2, 4) ||
             targetScale !in listOf(1.5, 2.0, 3.0, 4.0) ||
-            engine !in listOf("fusion", "render", "turbo", "superUltra", "animeUltra") ||
+            engine !in listOf("fusion", "render", "turbo", "superUltra", "animeUltra", "realism") ||
             content !in listOf("auto", "live", "anime") ||
             detailMode !in listOf("natural", "detailed", "sharp") ||
             codec !in listOf("hevc", "h264")) {
@@ -225,6 +240,10 @@ class MainActivity : FlutterActivity() {
             try {
                 when (engine) {
                     "animeUltra" -> animeSession
+                    "realism" -> {
+                        cdaInitializerSession
+                        cdaRecurrentSession
+                    }
                     else -> ensureModels()
                 }
                 val response = processVideo(
@@ -281,7 +300,8 @@ class MainActivity : FlutterActivity() {
         val maxInputEdge = if (!nativeUsesVulkan()) {
             if (engine == "turbo") 480 else 384
         } else when (engine) {
-            "animeUltra" -> if (efficient) 240 else 320
+            "animeUltra" -> if (efficient) 360 else 480
+            "realism" -> if (efficient) 384 else 480
             "superUltra" -> if (efficient) 720 else 960
             "turbo" -> if (efficient) 720 else 960
             "render" -> if (efficient) 640 else 896
@@ -367,6 +387,8 @@ class MainActivity : FlutterActivity() {
                 null
             }
             val animeState = AnimeRuntimeState()
+            val cdaState = CdaRuntimeState()
+            var previousCdaFrame: Bitmap? = null
             for (frameIndex in 0 until frameCount) {
                 check(!cancelled.get()) { "Video upscaling was cancelled." }
                 if (engine == "animeUltra") {
@@ -434,6 +456,40 @@ class MainActivity : FlutterActivity() {
                 }
                 val rgba = fitted.copy(Bitmap.Config.ARGB_8888, false)
                 fitted.recycle()
+                if (engine == "realism") {
+                    if (previousCdaFrame != null && isSceneCut(previousCdaFrame!!, rgba)) {
+                        cdaState.reset()
+                    }
+                    if (cdaState.framesSinceReset >= 25) cdaState.reset()
+                    val enhanced = upscaleCda(previousCdaFrame, rgba, cdaState)
+                    previousCdaFrame?.recycle()
+                    previousCdaFrame = rgba
+                    val outputFrame = if (
+                        enhanced.width == outputWidth && enhanced.height == outputHeight
+                    ) {
+                        enhanced
+                    } else {
+                        Bitmap.createScaledBitmap(
+                            enhanced,
+                            outputWidth,
+                            outputHeight,
+                            true,
+                        ).also { enhanced.recycle() }
+                    }
+                    queueFrame(
+                        encoder,
+                        outputFrame,
+                        frameIndex,
+                        fps,
+                        muxer,
+                        muxState,
+                        audioFormat,
+                    )
+                    outputFrame.recycle()
+                    applyThermalBackoff(frameIndex)
+                    emitProgress(0.02 + (frameIndex + 1).toDouble() / frameCount * 0.92)
+                    continue
+                }
                 val modelSharpness = when (engine) {
                     "superUltra" -> when (detailMode) {
                         "sharp" -> 0.16f
@@ -478,6 +534,7 @@ class MainActivity : FlutterActivity() {
             listOfNotNull(previousAnimeFrame, currentAnimeFrame, nextAnimeFrame)
                 .distinctBy { System.identityHashCode(it) }
                 .forEach { if (!it.isRecycled) it.recycle() }
+            previousCdaFrame?.let { if (!it.isRecycled) it.recycle() }
             queueEndOfStream(encoder, frameCount, fps, muxer, muxState, audioFormat)
             if (sourceAudioTrack >= 0 && muxState.audioTrack >= 0) {
                 copyAudio(audioExtractor, sourceAudioTrack, muxer, muxState.audioTrack)
@@ -512,6 +569,8 @@ class MainActivity : FlutterActivity() {
                 "SuperUltra — ${contentLabel(content)}, ${detailMode.replaceFirstChar { it.uppercase() }} (${backendLabel(engine)})"
             } else if (engine == "animeUltra") {
                 "AniUltraAnime — AnimeSR_v2 recurrent (${backendLabel(engine)})"
+            } else if (engine == "realism") {
+                "AniRealism Test — CDA-VSR recurrent (${backendLabel(engine)})"
             } else {
                 "${engineLabel(engine)} (${backendLabel(engine)})"
             },
@@ -522,7 +581,7 @@ class MainActivity : FlutterActivity() {
         check(exists() || mkdirs()) { "AniScale could not create its local history folder." }
     }
 
-    private fun backendLabel(engine: String? = null): String = if (engine == "animeUltra") {
+    private fun backendLabel(engine: String? = null): String = if (engine == "animeUltra" || engine == "realism") {
         "ONNX Runtime Mobile"
     } else if (engine == "superUltra") {
         if (nativeUsesVulkan()) "SPAN ncnn Vulkan FP16" else "SPAN ncnn CPU"
@@ -536,6 +595,7 @@ class MainActivity : FlutterActivity() {
         "render" -> "AniScale Render"
         "turbo" -> "AniScale Turbo"
         "animeUltra" -> "AniUltraAnime"
+        "realism" -> "AniRealism Test"
         "superUltra" -> "SuperUltra"
         else -> "AniScale Fusion"
     }
@@ -690,6 +750,213 @@ class MainActivity : FlutterActivity() {
         }
         return output
     }
+
+    private data class CdaRuntimeState(
+        var width: Int = 0,
+        var height: Int = 0,
+        var low: FloatArray = FloatArray(0),
+        var high: FloatArray = FloatArray(0),
+        var framesSinceReset: Int = 0,
+    ) {
+        fun reset() {
+            low = FloatArray(0)
+            high = FloatArray(0)
+            framesSinceReset = 0
+        }
+    }
+
+    private fun upscaleCda(
+        previous: Bitmap?,
+        current: Bitmap,
+        state: CdaRuntimeState,
+    ): Bitmap {
+        val width = current.width
+        val height = current.height
+        val plane = width * height
+        if (state.width != width || state.height != height) {
+            state.width = width
+            state.height = height
+            state.reset()
+        }
+        val frame = FloatArray(3 * plane)
+        appendRgbPlanes(current, frame, 0)
+        val inputShape = longArrayOf(1, 3, height.toLong(), width.toLong())
+        val outputNames = setOf("output", "next_state_low", "next_state_high")
+        val result = if (state.low.isEmpty() || state.high.isEmpty() || previous == null) {
+            OnnxTensor.createTensor(
+                animeEnvironment,
+                FloatBuffer.wrap(frame),
+                inputShape,
+            ).use { frameTensor ->
+                cdaInitializerSession.run(
+                    mapOf("frame" to frameTensor),
+                    outputNames,
+                )
+            }
+        } else {
+            val priors = decodedCdaPriors(previous, current)
+            OnnxTensor.createTensor(
+                animeEnvironment,
+                FloatBuffer.wrap(frame),
+                inputShape,
+            ).use { frameTensor ->
+                OnnxTensor.createTensor(
+                    animeEnvironment,
+                    FloatBuffer.wrap(priors.first),
+                    longArrayOf(1, 2, height.toLong(), width.toLong()),
+                ).use { motionTensor ->
+                    OnnxTensor.createTensor(
+                        animeEnvironment,
+                        FloatBuffer.wrap(priors.second),
+                        longArrayOf(1, 1, height.toLong(), width.toLong()),
+                    ).use { residualTensor ->
+                        OnnxTensor.createTensor(
+                            animeEnvironment,
+                            FloatBuffer.wrap(state.low),
+                            longArrayOf(1, 64, height.toLong(), width.toLong()),
+                        ).use { lowTensor ->
+                            OnnxTensor.createTensor(
+                                animeEnvironment,
+                                FloatBuffer.wrap(state.high),
+                                longArrayOf(1, 64, height.toLong(), width.toLong()),
+                            ).use { highTensor ->
+                                cdaRecurrentSession.run(
+                                    mapOf(
+                                        "frame" to frameTensor,
+                                        "motion" to motionTensor,
+                                        "residual" to residualTensor,
+                                        "state_low" to lowTensor,
+                                        "state_high" to highTensor,
+                                    ),
+                                    outputNames,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        result.use {
+            @Suppress("UNCHECKED_CAST")
+            val output = it.get("output").orElseThrow().value as Array<Array<Array<FloatArray>>>
+            @Suppress("UNCHECKED_CAST")
+            val nextLow = it.get("next_state_low").orElseThrow().value as Array<Array<Array<FloatArray>>>
+            @Suppress("UNCHECKED_CAST")
+            val nextHigh = it.get("next_state_high").orElseThrow().value as Array<Array<Array<FloatArray>>>
+            val outputChannels = output[0]
+            state.low = flattenChannels(nextLow[0], 64, height, width)
+            state.high = flattenChannels(nextHigh[0], 64, height, width)
+            state.framesSinceReset++
+            return bitmapFromChannels(outputChannels, width * 4, height * 4)
+        }
+    }
+
+    private fun bitmapFromChannels(
+        channels: Array<Array<FloatArray>>,
+        width: Int,
+        height: Int,
+    ): Bitmap {
+        val pixels = IntArray(width * height)
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                val red = (channels[0][y][x].coerceIn(0f, 1f) * 255).roundToInt()
+                val green = (channels[1][y][x].coerceIn(0f, 1f) * 255).roundToInt()
+                val blue = (channels[2][y][x].coerceIn(0f, 1f) * 255).roundToInt()
+                pixels[y * width + x] =
+                    (0xff shl 24) or (red shl 16) or (green shl 8) or blue
+            }
+        }
+        return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
+    }
+
+    private fun decodedCdaPriors(
+        previous: Bitmap,
+        current: Bitmap,
+    ): Pair<FloatArray, FloatArray> {
+        val width = current.width
+        val height = current.height
+        val plane = width * height
+        val previousPixels = IntArray(plane)
+        val currentPixels = IntArray(plane)
+        previous.getPixels(previousPixels, 0, width, 0, 0, width, height)
+        current.getPixels(currentPixels, 0, width, 0, 0, width, height)
+        val previousLuma = FloatArray(plane)
+        val currentLuma = FloatArray(plane)
+        for (index in 0 until plane) {
+            previousLuma[index] = pixelLuma(previousPixels[index])
+            currentLuma[index] = pixelLuma(currentPixels[index])
+        }
+        val motion = FloatArray(2 * plane)
+        val residual = FloatArray(plane)
+        val blockSize = 16
+        val radius = 4
+        val sampleStride = 4
+        for (originY in 0 until height step blockSize) {
+            for (originX in 0 until width step blockSize) {
+                var bestX = 0
+                var bestY = 0
+                var bestScore = Float.POSITIVE_INFINITY
+                for (deltaY in -radius..radius) {
+                    for (deltaX in -radius..radius) {
+                        var score = 0f
+                        var count = 0
+                        for (sampleY in 0 until blockSize step sampleStride) {
+                            val y = originY + sampleY
+                            if (y >= height) continue
+                            for (sampleX in 0 until blockSize step sampleStride) {
+                                val x = originX + sampleX
+                                if (x >= width) continue
+                                val referenceX = x + deltaX
+                                val referenceY = y + deltaY
+                                score += if (
+                                    referenceX in 0 until width && referenceY in 0 until height
+                                ) {
+                                    kotlin.math.abs(
+                                        currentLuma[y * width + x] -
+                                            previousLuma[referenceY * width + referenceX],
+                                    )
+                                } else {
+                                    1f
+                                }
+                                count++
+                            }
+                        }
+                        score /= max(1, count)
+                        val candidateMagnitude = kotlin.math.abs(deltaX) + kotlin.math.abs(deltaY)
+                        val bestMagnitude = kotlin.math.abs(bestX) + kotlin.math.abs(bestY)
+                        if (
+                            score < bestScore - 1e-7f ||
+                            (kotlin.math.abs(score - bestScore) <= 1e-7f &&
+                                candidateMagnitude < bestMagnitude)
+                        ) {
+                            bestScore = score
+                            bestX = deltaX
+                            bestY = deltaY
+                        }
+                    }
+                }
+                for (y in originY until min(height, originY + blockSize)) {
+                    for (x in originX until min(width, originX + blockSize)) {
+                        val index = y * width + x
+                        motion[index] = bestX.toFloat()
+                        motion[plane + index] = bestY.toFloat()
+                        val referenceX = (x + bestX).coerceIn(0, width - 1)
+                        val referenceY = (y + bestY).coerceIn(0, height - 1)
+                        residual[index] = kotlin.math.abs(
+                            currentLuma[index] - previousLuma[referenceY * width + referenceX],
+                        )
+                    }
+                }
+            }
+        }
+        return motion to residual
+    }
+
+    private fun pixelLuma(pixel: Int): Float = (
+        0.2126f * ((pixel shr 16) and 255) +
+            0.7152f * ((pixel shr 8) and 255) +
+            0.0722f * (pixel and 255)
+        ) / 255f
 
     private fun isSceneCut(previous: Bitmap, current: Bitmap): Boolean {
         val stepX = max(1, current.width / 32)

@@ -35,6 +35,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
   private lazy var renderModel = loadModel(named: "RealESRGAN_render_x4plus_266_fp16")
   private lazy var turboModel = loadModel(named: "AniScale_turbo_animevideo_266_fp16")
   private lazy var animeUltraModel = loadModel(named: "AniUltraAnime_v2_recurrent")
+  private lazy var cdaEngine: CDAEngine = try! CDAEngine()
   private lazy var superUltra2xModel = loadModel(named: "SuperUltra_span_x2_fp16")
   private lazy var superUltra4xModel = loadModel(named: "SuperUltra_span_x4_fp16")
   private lazy var superUltraAnime2xModel = loadModel(named: "SuperUltra_span_anime_x2_fp16")
@@ -111,7 +112,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         let content = arguments["content"] as? String ?? "auto"
         let detailMode = arguments["detailMode"] as? String ?? "natural"
         let codec = arguments["codec"] as? String ?? "hevc"
-        guard engine == "fusion" || engine == "render" || engine == "turbo" || engine == "superUltra" || engine == "animeUltra",
+        guard engine == "fusion" || engine == "render" || engine == "turbo" || engine == "superUltra" || engine == "animeUltra" || engine == "realism",
               [1.5, 2.0, 3.0, 4.0].contains(targetScale),
               ["auto", "live", "anime"].contains(content),
               ["natural", "detailed", "sharp"].contains(detailMode),
@@ -434,7 +435,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       : (engine == "render" ? renderModel : (engine == "turbo" ? turboModel : fusionModel))
     let engineLabel = engine == "render"
       ? "AniScale Render"
-      : (engine == "turbo" ? "AniScale Turbo" : (engine == "animeUltra" ? "AniUltraAnime" : (engine == "superUltra" ? "SuperUltra" : "AniScale Fusion")))
+      : (engine == "turbo" ? "AniScale Turbo" : (engine == "animeUltra" ? "AniUltraAnime" : (engine == "realism" ? "AniRealism Test" : (engine == "superUltra" ? "SuperUltra" : "AniScale Fusion"))))
     let videoDenoise = engine == "superUltra"
       ? (content == "anime" ? 0.08 : 0.04)
       : (engine == "render" ? 0.34 : (engine == "turbo" ? 0.16 : 0.2))
@@ -526,7 +527,9 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
 
     let ciContext = CIContext(options: [.useSoftwareRenderer: false])
     let animeState = AnimeCoreMLState()
+    let cdaState = CDAEngine.State()
     var previousAnimeFrame: CGImage?
+    var previousCdaFrame: CGImage?
     var currentSample = readerOutput.copyNextSampleBuffer()
     var nextAnimeSample = engine == "animeUltra" ? readerOutput.copyNextSampleBuffer() : nil
     while let sample = currentSample {
@@ -559,8 +562,10 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       )
       try autoreleasepool {
         let frameLimit: CGFloat? = engine == "animeUltra"
-          ? CGFloat(efficient ? 240 : 320)
-          : (efficient ? 960 : nil)
+          ? CGFloat(efficient ? 480 : 640)
+          : (engine == "realism"
+            ? CGFloat(efficient ? 384 : 480)
+            : (efficient ? 960 : nil))
         let frameImage = try preparedVideoFrame(
           sample,
           track: videoTrack,
@@ -593,6 +598,22 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
             state: animeState
           )
           previousAnimeFrame = frameImage
+          tileInferenceMilliseconds.append(
+            (ProcessInfo.processInfo.systemUptime - inferenceStarted) * 1_000
+          )
+          emitProgress(min(0.92, frameStart + frameStep))
+        } else if engine == "realism" {
+          if let previousCdaFrame, isSceneCut(previousCdaFrame, frameImage) {
+            cdaState.reset()
+          }
+          if cdaState.framesSinceReset >= 25 { cdaState.reset() }
+          let inferenceStarted = ProcessInfo.processInfo.systemUptime
+          enhancedImage = try cdaEngine.process(
+            previous: previousCdaFrame,
+            current: frameImage,
+            state: cdaState
+          )
+          previousCdaFrame = frameImage
           tileInferenceMilliseconds.append(
             (ProcessInfo.processInfo.systemUptime - inferenceStarted) * 1_000
           )
@@ -700,9 +721,11 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         ? "SuperUltra — \(content.capitalized), \(detailMode.capitalized) (Core ML/Metal)"
         : (engine == "animeUltra"
           ? "AniUltraAnime — AnimeSR_v2 recurrent (Core ML/Metal)"
-          : (efficient
-            ? "\(engineLabel) (Efficient Core ML)"
-            : "\(engineLabel) (Maximum Core ML)"))
+          : (engine == "realism"
+            ? "AniRealism Test — CDA-VSR recurrent (ONNX Runtime/Core ML)"
+            : (efficient
+              ? "\(engineLabel) (Efficient Core ML)"
+              : "\(engineLabel) (Maximum Core ML)")))
     ]
   }
 
