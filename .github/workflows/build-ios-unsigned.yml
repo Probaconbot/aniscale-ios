@@ -141,7 +141,7 @@ jobs:
           git -C "$RUNNER_TEMP/flux-fidelity" checkout 03acb0f8f8e0f1c8219a8ab0e842a0efcc74b18c
           git clone https://github.com/sspBIT/CDA-VSR.git "$RUNNER_TEMP/CDA-VSR"
           git -C "$RUNNER_TEMP/CDA-VSR" checkout 5707d997759996f19521c3beaddfb3d1ea965d44
-          echo "0defb80e5fcbaa2abd0eb9cbc4f4f2050a68e94fa6f743aa48a785cc734fd87b  $RUNNER_TEMP/CDA-VSR/model/CDA.py" | shasum -a 256 -c -
+          echo "0defb80e5fcbaa2abd0eb9cbc4f4f2050a68e94fa6f743aa48a785cc734fd87b  $RUNNER_TEMP/CDA-VSR/basicsr/archs/cdavsr_arch.py" | shasum -a 256 -c -
           echo "afc8745b890289ae421c500279d9ccf2a27c92cf3e71133b20840c7816e86d3e  $RUNNER_TEMP/CDA-VSR/pretrained_models/best.pth" | shasum -a 256 -c -
           python -m pip install -r "$RUNNER_TEMP/flux-fidelity/tools/cda-vsr/requirements.txt"
           python "$RUNNER_TEMP/flux-fidelity/tools/cda-vsr/cda_tool.py" export \
