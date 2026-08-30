@@ -102,10 +102,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "numpy<2" "torch==2.5.1" "coremltools==8.1" "onnx==1.17.0" "gdown==5.2.0"
           mkdir -p "$RUNNER_TEMP/animesr-weights" build/aniultraanime ios/Runner/Models android/app/src/main/assets/models
-          gdown --folder 'https://drive.google.com/drive/folders/1gwNTbKLUjt5FlgT6PQQnBz5wFzmNUX8g' \
-            -O "$RUNNER_TEMP/animesr-weights"
-          ANIME_CHECKPOINT="$(find "$RUNNER_TEMP/animesr-weights" -type f -name 'AnimeSR_v2.pth' -print -quit)"
-          test -n "$ANIME_CHECKPOINT"
+          # Fetch only the recommended v2 checkpoint. Downloading the whole
+          # upstream Drive folder also touches the retired v1 file, which is
+          # intermittently denied and used to abort otherwise valid builds.
+          ANIME_CHECKPOINT="$RUNNER_TEMP/animesr-weights/AnimeSR_v2.pth"
+          gdown 'https://drive.google.com/uc?id=1E_qsFqlIre-fMUSSLADQboBssNIWSqmm' \
+            -O "$ANIME_CHECKPOINT"
           echo "d0f29c8966b53718828bd424bbdc306e7ff0cbf6350beadaf8b5b2500b108548  $ANIME_CHECKPOINT" | shasum -a 256 -c -
           python tools/convert_animesr_mobile.py \
             --checkpoint "$ANIME_CHECKPOINT" \
@@ -120,6 +122,15 @@ jobs:
         run: |
           test -f ios/Runner/Models/AniUltraAnime_v2_recurrent.mlpackage/Manifest.json
           test -f android/app/src/main/assets/models/AniUltraAnime_v2_recurrent.onnx
+
+      - name: Save AniUltraAnime recurrent runtime
+        if: steps.anime-vsr-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ios/Runner/Models/AniUltraAnime_v2_recurrent.mlpackage
+            android/app/src/main/assets/models/AniUltraAnime_v2_recurrent.onnx
+          key: aniultraanime-v2-mobile-v1-${{ hashFiles('tools/convert_animesr_mobile.py') }}
 
       - name: Restore private AniRealism CDA-VSR models
         id: cda-vsr-cache
@@ -174,6 +185,17 @@ jobs:
           test -s ios/Runner/Models/AniRealism_cda_vsr_recurrent.onnx
           test -s android/app/src/main/assets/models/AniRealism_cda_vsr_initializer.onnx
           test -s android/app/src/main/assets/models/AniRealism_cda_vsr_recurrent.onnx
+
+      - name: Save private AniRealism CDA-VSR models
+        if: steps.cda-vsr-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ios/Runner/Models/AniRealism_cda_vsr_initializer.onnx
+            ios/Runner/Models/AniRealism_cda_vsr_recurrent.onnx
+            android/app/src/main/assets/models/AniRealism_cda_vsr_initializer.onnx
+            android/app/src/main/assets/models/AniRealism_cda_vsr_recurrent.onnx
+          key: anirealism-cda-vsr-fp32-v1
 
       - name: Restore SuperUltra Core ML models
         id: superultra-coreml-cache
@@ -310,7 +332,19 @@ jobs:
 
       - name: Build Android APK
         shell: bash
-        run: flutter build apk --release
+        run: |
+          set -o pipefail
+          set +e
+          flutter build apk --release 2>&1 | tee "$RUNNER_TEMP/android-build.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            grep -Ei "error|failed|MainActivity|onnxruntime|CMake" "$RUNNER_TEMP/android-build.log" | tail -n 20 | while IFS= read -r line; do
+              message=$(printf '%s' "$line" | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
+              echo "::error title=Android build failed::$message"
+            done
+            exit "$status"
+          fi
 
       - name: Upload AniScale APK
         if: ${{ github.event_name == 'workflow_dispatch' && !inputs.private_test }}
