@@ -480,8 +480,8 @@ class MainActivity : FlutterActivity() {
                     if (previousCdaFrame != null && isSceneCut(previousCdaFrame!!, rgba)) {
                         cdaState.reset()
                     }
-                    if (cdaState.framesSinceReset >= 12) cdaState.reset()
-                    val enhanced = upscaleCda(previousCdaFrame, rgba, cdaState)
+                    if (cdaState.framesSinceReset >= 30) cdaState.reset()
+                    val enhanced = upscaleCda(previousCdaFrame, rgba, cdaState, detailMode)
                     previousCdaFrame?.recycle()
                     previousCdaFrame = rgba
                     val outputFrame = if (
@@ -789,6 +789,7 @@ class MainActivity : FlutterActivity() {
         previous: Bitmap?,
         current: Bitmap,
         state: CdaRuntimeState,
+        detailMode: String,
     ): Bitmap {
         val width = current.width
         val height = current.height
@@ -861,7 +862,12 @@ class MainActivity : FlutterActivity() {
             state.low = tensorFloats(it.get("next_state_low").orElseThrow() as OnnxTensor)
             state.high = tensorFloats(it.get("next_state_high").orElseThrow() as OnnxTensor)
             state.framesSinceReset++
-            return bitmapFromPlanar(output, width * 4, height * 4)
+            val sharpening = when (detailMode) {
+                "sharp" -> 0.32f
+                "detailed" -> 0.20f
+                else -> 0.08f
+            }
+            return bitmapFromPlanar(output, width * 4, height * 4, sharpening)
         }
     }
 
@@ -876,15 +882,31 @@ class MainActivity : FlutterActivity() {
         channels: FloatArray,
         width: Int,
         height: Int,
+        sharpening: Float,
     ): Bitmap {
         val plane = width * height
         require(channels.size >= plane * 3) { "CDA-VSR returned an invalid output shape." }
         val pixels = IntArray(plane)
-        for (index in 0 until plane) {
-            val red = (channels[index].coerceIn(0f, 1f) * 255).roundToInt()
-            val green = (channels[plane + index].coerceIn(0f, 1f) * 255).roundToInt()
-            val blue = (channels[plane * 2 + index].coerceIn(0f, 1f) * 255).roundToInt()
+        fun enhanced(channel: Int, x: Int, y: Int): Float {
+            val index = y * width + x
+            val offset = channel * plane
+            val center = channels[offset + index]
+            if (sharpening <= 0f) return center.coerceIn(0f, 1f)
+            val left = channels[offset + y * width + max(0, x - 1)]
+            val right = channels[offset + y * width + min(width - 1, x + 1)]
+            val above = channels[offset + max(0, y - 1) * width + x]
+            val below = channels[offset + min(height - 1, y + 1) * width + x]
+            return (center + sharpening * (4f * center - left - right - above - below))
+                .coerceIn(0f, 1f)
+        }
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                val index = y * width + x
+                val red = (enhanced(0, x, y) * 255).roundToInt()
+                val green = (enhanced(1, x, y) * 255).roundToInt()
+                val blue = (enhanced(2, x, y) * 255).roundToInt()
             pixels[index] = (0xff shl 24) or (red shl 16) or (green shl 8) or blue
+            }
         }
         return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
     }

@@ -576,7 +576,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         let frameLimit: CGFloat? = engine == "animeUltra"
           ? CGFloat(efficient ? 480 : 640)
           : (engine == "realism"
-            ? CGFloat(efficient ? 256 : 320)
+            ? CGFloat(efficient ? 384 : 480)
             : (efficient ? 960 : nil))
         let frameImage = try preparedVideoFrame(
           sample,
@@ -618,7 +618,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           if let previousCdaFrame, isSceneCut(previousCdaFrame, frameImage) {
             cdaState.reset()
           }
-          if cdaState.framesSinceReset >= 12 { cdaState.reset() }
+          if cdaState.framesSinceReset >= 30 { cdaState.reset() }
           let inferenceStarted = ProcessInfo.processInfo.systemUptime
           guard let cdaRuntime else {
             throw EngineError("cda_load_failed", "AniRealism is unavailable on this iPhone.")
@@ -688,6 +688,40 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
             "CILanczosScaleTransform",
             parameters: [kCIInputScaleKey: fitScale, kCIInputAspectRatioKey: 1.0]
           )
+        }
+        if engine == "realism" {
+          enhancedFrame = enhancedFrame.applyingFilter(
+            "CINoiseReduction",
+            parameters: [
+              "inputNoiseLevel": detailMode == "natural" ? 0.018 : 0.012,
+              "inputSharpness": detailMode == "sharp" ? 0.55 : 0.42
+            ]
+          )
+          enhancedFrame = enhancedFrame.applyingFilter(
+            "CIColorControls",
+            parameters: [
+              kCIInputSaturationKey: 0.99,
+              kCIInputContrastKey: detailMode == "sharp" ? 1.075 : 1.045,
+              kCIInputBrightnessKey: 0.0
+            ]
+          )
+          enhancedFrame = enhancedFrame.applyingFilter(
+            "CISharpenLuminance",
+            parameters: [
+              kCIInputSharpnessKey: detailMode == "sharp"
+                ? 0.68
+                : (detailMode == "detailed" ? 0.48 : 0.24)
+            ]
+          )
+          if detailMode != "natural" {
+            enhancedFrame = enhancedFrame.applyingFilter(
+              "CIUnsharpMask",
+              parameters: [
+                kCIInputRadiusKey: detailMode == "sharp" ? 1.45 : 1.1,
+                kCIInputIntensityKey: detailMode == "sharp" ? 0.42 : 0.26
+              ]
+            )
+          }
         }
         ciContext.render(
           enhancedFrame,
