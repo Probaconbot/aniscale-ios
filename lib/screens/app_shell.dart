@@ -396,6 +396,8 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                     _scale = _targetScale <= 2 ? 2 : 4;
                   } else if (_engine == _VideoEngine.realism) {
                     _detailMode = 1;
+                  } else if (_engine == _VideoEngine.animeUltra) {
+                    _detailMode = 1;
                   }
                 }),
               ),
@@ -454,7 +456,8 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                 ),
               ],
               if (_engine == _VideoEngine.superUltra ||
-                  _engine == _VideoEngine.realism) ...[
+                  _engine == _VideoEngine.realism ||
+                  _engine == _VideoEngine.animeUltra) ...[
                 const SizedBox(height: 18),
                 const ControlLabel('DETAIL'),
                 const SizedBox(height: 9),

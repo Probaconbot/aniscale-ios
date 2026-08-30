@@ -574,7 +574,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       )
       let enhancedImage: CGImage = try autoreleasepool {
         let frameLimit: CGFloat? = engine == "animeUltra"
-          ? CGFloat(efficient ? 480 : 640)
+          ? CGFloat(efficient ? 640 : 768)
           : (engine == "realism"
             ? CGFloat(efficient ? 384 : 480)
             : (efficient ? 960 : nil))
@@ -719,6 +719,32 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
               parameters: [
                 kCIInputRadiusKey: detailMode == "sharp" ? 1.45 : 1.1,
                 kCIInputIntensityKey: detailMode == "sharp" ? 0.42 : 0.26
+              ]
+            )
+          }
+        } else if engine == "animeUltra" {
+          enhancedFrame = enhancedFrame.applyingFilter(
+            "CIColorControls",
+            parameters: [
+              kCIInputSaturationKey: 1.0,
+              kCIInputContrastKey: detailMode == "sharp" ? 1.065 : 1.035,
+              kCIInputBrightnessKey: 0.0
+            ]
+          )
+          enhancedFrame = enhancedFrame.applyingFilter(
+            "CISharpenLuminance",
+            parameters: [
+              kCIInputSharpnessKey: detailMode == "sharp"
+                ? 0.62
+                : (detailMode == "detailed" ? 0.44 : 0.20)
+            ]
+          )
+          if detailMode != "natural" {
+            enhancedFrame = enhancedFrame.applyingFilter(
+              "CIUnsharpMask",
+              parameters: [
+                kCIInputRadiusKey: detailMode == "sharp" ? 1.05 : 0.8,
+                kCIInputIntensityKey: detailMode == "sharp" ? 0.36 : 0.22
               ]
             )
           }

@@ -15,7 +15,7 @@ on:
         description: Private test version label
         required: false
         type: string
-        default: 1.15.0-cda-test.4
+        default: 1.15.0-cda-test.5
 
 permissions:
   contents: write
@@ -360,7 +360,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TEST_VERSION: ${{ inputs.version || '1.15.0-cda-test.4' }}
+          TEST_VERSION: ${{ inputs.version || '1.15.0-cda-test.5' }}
         run: |
           set -euo pipefail
           test -n "$TEST_VERSION"
@@ -381,6 +381,8 @@ jobs:
           - Defers the full-resolution encoder buffer until inference temporaries are released.
           - Restores higher-resolution CDA inference and adds edge-aware detail finishing.
           - Exposes Natural, Detailed, and Sharp controls for AniRealism on both platforms.
+          - Raises AniUltraAnime's neural working resolution for genuinely more detailed 4K output.
+          - Adds anime-specific detail finishing and flat Android tensor extraction.
           - Raises AniUltraAnime working resolution to preserve substantially more linework and texture.
           - Includes unsigned iOS IPA and Android APK.
 

@@ -320,7 +320,7 @@ class MainActivity : FlutterActivity() {
         val maxInputEdge = if (!nativeUsesVulkan()) {
             if (engine == "turbo") 480 else 384
         } else when (engine) {
-            "animeUltra" -> if (efficient) 360 else 480
+            "animeUltra" -> if (efficient) 480 else 640
             "realism" -> if (efficient) 320 else 384
             "superUltra" -> if (efficient) 720 else 960
             "turbo" -> if (efficient) 720 else 960
@@ -418,7 +418,7 @@ class MainActivity : FlutterActivity() {
                     if (previousAnimeFrame != null && isSceneCut(previous, current)) {
                         animeState.reset()
                     }
-                    val enhanced = upscaleAnime(previous, current, next, animeState)
+                    val enhanced = upscaleAnime(previous, current, next, animeState, detailMode)
                     previousAnimeFrame?.recycle()
                     previousAnimeFrame = current
                     currentAnimeFrame = nextAnimeFrame
@@ -673,6 +673,7 @@ class MainActivity : FlutterActivity() {
         current: Bitmap,
         next: Bitmap,
         state: AnimeRuntimeState,
+        detailMode: String,
     ): Bitmap {
         val width = current.width
         val height = current.height
@@ -706,34 +707,19 @@ class MainActivity : FlutterActivity() {
                             "state" to stateTensor,
                         ),
                     ).use { result ->
-                        @Suppress("UNCHECKED_CAST")
-                        val enhanced = result[0].value as Array<Array<Array<FloatArray>>>
-                        @Suppress("UNCHECKED_CAST")
-                        val nextState = result[1].value as Array<Array<Array<FloatArray>>>
-                        val enhancedChannels = enhanced[0]
-                        val stateChannels = nextState[0]
-                        state.feedback = flattenChannels(
-                            enhancedChannels,
-                            3,
-                            outputHeight,
-                            outputWidth,
-                        )
-                        state.hidden = flattenChannels(stateChannels, 64, height, width)
-                        val outputPixels = IntArray(outputWidth * outputHeight)
-                        for (y in 0 until outputHeight) {
-                            for (x in 0 until outputWidth) {
-                                val red = (enhancedChannels[0][y][x].coerceIn(0f, 1f) * 255).roundToInt()
-                                val green = (enhancedChannels[1][y][x].coerceIn(0f, 1f) * 255).roundToInt()
-                                val blue = (enhancedChannels[2][y][x].coerceIn(0f, 1f) * 255).roundToInt()
-                                outputPixels[y * outputWidth + x] =
-                                    (0xff shl 24) or (red shl 16) or (green shl 8) or blue
-                            }
+                        val enhanced = tensorFloats(result[0] as OnnxTensor)
+                        state.feedback = enhanced
+                        state.hidden = tensorFloats(result[1] as OnnxTensor)
+                        val sharpening = when (detailMode) {
+                            "sharp" -> 0.28f
+                            "detailed" -> 0.17f
+                            else -> 0.06f
                         }
-                        return Bitmap.createBitmap(
-                            outputPixels,
+                        return bitmapFromPlanar(
+                            enhanced,
                             outputWidth,
                             outputHeight,
-                            Bitmap.Config.ARGB_8888,
+                            sharpening,
                         )
                     }
                 }

@@ -153,10 +153,13 @@ def export(checkpoint: Path, output: Path) -> None:
     )
 
     traced = torch.jit.trace(model, (frames, feedback, state), strict=False)
-    height = ct.RangeDim(lower_bound=32, upper_bound=640, default=180)
-    width = ct.RangeDim(lower_bound=32, upper_bound=640, default=320)
-    height4 = ct.RangeDim(lower_bound=128, upper_bound=2560, default=720)
-    width4 = ct.RangeDim(lower_bound=128, upper_bound=2560, default=1280)
+    # Preserve enough source pixels for a visibly detailed 4K result. The old
+    # 640px ceiling forced even Maximum mode through a 2560px neural result and
+    # then enlarged it again, making a nominal 4K export look soft.
+    height = ct.RangeDim(lower_bound=32, upper_bound=768, default=180)
+    width = ct.RangeDim(lower_bound=32, upper_bound=768, default=320)
+    height4 = ct.RangeDim(lower_bound=128, upper_bound=3072, default=720)
+    width4 = ct.RangeDim(lower_bound=128, upper_bound=3072, default=1280)
     package = ct.convert(
         traced,
         convert_to="mlprogram",
