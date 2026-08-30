@@ -153,10 +153,10 @@ def export(checkpoint: Path, output: Path) -> None:
     )
 
     traced = torch.jit.trace(model, (frames, feedback, state), strict=False)
-    height = ct.RangeDim(lower_bound=32, upper_bound=320, default=180)
-    width = ct.RangeDim(lower_bound=32, upper_bound=320, default=320)
-    height4 = ct.RangeDim(lower_bound=128, upper_bound=1280, default=720)
-    width4 = ct.RangeDim(lower_bound=128, upper_bound=1280, default=1280)
+    height = ct.RangeDim(lower_bound=32, upper_bound=640, default=180)
+    width = ct.RangeDim(lower_bound=32, upper_bound=640, default=320)
+    height4 = ct.RangeDim(lower_bound=128, upper_bound=2560, default=720)
+    width4 = ct.RangeDim(lower_bound=128, upper_bound=2560, default=1280)
     package = ct.convert(
         traced,
         convert_to="mlprogram",

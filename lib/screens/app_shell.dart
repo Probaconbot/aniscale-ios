@@ -282,7 +282,7 @@ class VideoSelectedScreen extends StatefulWidget {
   State<VideoSelectedScreen> createState() => _VideoSelectedScreenState();
 }
 
-enum _VideoEngine { fusion, render, turbo, superUltra, animeUltra }
+enum _VideoEngine { fusion, render, turbo, superUltra, animeUltra, realism }
 
 class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
   int _scale = 2;
@@ -385,6 +385,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                         _VideoEngine.turbo => 'Turbo',
                         _VideoEngine.superUltra => 'Super',
                         _VideoEngine.animeUltra => 'Anime VSR',
+                        _VideoEngine.realism => 'Realism',
                       },
                     )
                     .toList(),
@@ -404,6 +405,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                   _VideoEngine.turbo => 'AniScale Turbo — a compact video model for faster processing and lower heat.',
                   _VideoEngine.superUltra => 'SuperUltra — offline SPAN restoration with native mobile acceleration and no temporary frame files.',
                   _VideoEngine.animeUltra => 'AniUltraAnime — official AnimeSR_v2 with neighboring frames, persistent recurrent state, and automatic scene-cut reset.',
+                  _VideoEngine.realism => 'AniRealism Test — CDA-VSR recurrent live-action restoration with persistent temporal states and decoded-frame priors.',
                 },
                 textAlign: TextAlign.center,
                 style: const TextStyle(
@@ -417,6 +419,8 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                     ? 'SUPERULTRA SCALE'
                     : _engine == _VideoEngine.animeUltra
                     ? 'ANIME UPSCALE'
+                    : _engine == _VideoEngine.realism
+                    ? 'LIVE-ACTION UPSCALE'
                     : 'VIDEO UPSCALE',
               ),
               const SizedBox(height: 9),
@@ -474,8 +478,8 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
               const SizedBox(height: 8),
               Text(
                 _performance == 0
-                    ? 'Recommended: lower heat and faster processing with a bounded AI working resolution.'
-                    : 'Full-resolution neural input. Slowest mode with higher memory and battery use.',
+                    ? 'Recommended: lower heat and faster processing with a quality-preserving working resolution.'
+                    : 'Higher neural working resolution. Slower, with higher memory and battery use.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   color: AniColors.mutedText,
@@ -496,11 +500,13 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                     _VideoEngine.turbo => 'AniScale Turbo — Fast',
                     _VideoEngine.superUltra => 'SuperUltra — Offline SPAN',
                     _VideoEngine.animeUltra => 'AniUltraAnime — AnimeSR_v2',
+                    _VideoEngine.realism => 'AniRealism Test — CDA-VSR',
                   }),
                   subtitle: Text(
                     '${switch (_engine) {
                       _VideoEngine.superUltra => Platform.isIOS ? 'Core ML/Metal FP16' : 'ncnn Vulkan FP16',
                       _VideoEngine.animeUltra => Platform.isIOS ? 'Core ML recurrent VSR' : 'ONNX Runtime recurrent VSR',
+                      _VideoEngine.realism => 'ONNX Runtime recurrent CDA-VSR',
                       _ => Platform.isIOS ? 'Core ML' : 'ncnn Vulkan',
                     }} processes locally. Original audio is preserved and oversized results fit a safe 4K output.',
                   ),
@@ -1128,6 +1134,7 @@ class _EditorScreenState extends State<EditorScreen> {
                     'Compact 2×/4× model for the fastest, coolest result.',
                   _VideoEngine.superUltra => 'Video-only offline SPAN engine; choose another engine for images.',
                   _VideoEngine.animeUltra => 'Video-only recurrent AnimeSR_v2 engine; choose another engine for images.',
+                  _VideoEngine.realism => 'Private-test live-action CDA-VSR engine; choose another engine for images.',
                 },
                 textAlign: TextAlign.center,
                 style: const TextStyle(
