@@ -124,8 +124,8 @@ final class CDAEngine {
         userInfo: [NSLocalizedDescriptionKey: "CDA-VSR returned incomplete output."]
       )
     }
-    state.low = NSMutableData(data: try lowValue.tensorData())
-    state.high = NSMutableData(data: try highValue.tensorData())
+    state.low = try lowValue.tensorData()
+    state.high = try highValue.tensorData()
     state.framesSinceReset += 1
     return try image(
       from: try outputValue.tensorData(),
