@@ -35,7 +35,6 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
   private lazy var renderModel = loadModel(named: "RealESRGAN_render_x4plus_266_fp16")
   private lazy var turboModel = loadModel(named: "AniScale_turbo_animevideo_266_fp16")
   private lazy var animeUltraModel = loadModel(named: "AniUltraAnime_v2_recurrent")
-  private lazy var cdaEngine: CDAEngine = try! CDAEngine()
   private lazy var superUltra2xModel = loadModel(named: "SuperUltra_span_x2_fp16")
   private lazy var superUltra4xModel = loadModel(named: "SuperUltra_span_x4_fp16")
   private lazy var superUltraAnime2xModel = loadModel(named: "SuperUltra_span_anime_x2_fp16")
@@ -428,11 +427,22 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     var tileInferenceMilliseconds: [Double] = []
     var processedFrames = 0
     let superUltraNativeScale = targetScale <= 2 ? 2 : 4
-    let selectedModel = engine == "superUltra"
-      ? (superUltraNativeScale == 2
+    let selectedModel: MLModel?
+    if engine == "superUltra" {
+      selectedModel = superUltraNativeScale == 2
         ? (content == "anime" ? superUltraAnime2xModel : superUltra2xModel)
-        : superUltra4xModel)
-      : (engine == "render" ? renderModel : (engine == "turbo" ? turboModel : fusionModel))
+        : superUltra4xModel
+    } else if engine == "render" {
+      selectedModel = renderModel
+    } else if engine == "turbo" {
+      selectedModel = turboModel
+    } else if engine == "fusion" {
+      selectedModel = fusionModel
+    } else {
+      // Temporal engines own their runtimes and must not also allocate a large
+      // still-image Core ML graph while processing video.
+      selectedModel = nil
+    }
     let engineLabel = engine == "render"
       ? "AniScale Render"
       : (engine == "turbo" ? "AniScale Turbo" : (engine == "animeUltra" ? "AniUltraAnime" : (engine == "realism" ? "AniRealism Test" : (engine == "superUltra" ? "SuperUltra" : "AniScale Fusion"))))
@@ -528,6 +538,19 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
     let ciContext = CIContext(options: [.useSoftwareRenderer: false])
     let animeState = AnimeCoreMLState()
     let cdaState = CDAEngine.State()
+    let cdaRuntime: CDAEngine?
+    if engine == "realism" {
+      do {
+        cdaRuntime = try CDAEngine()
+      } catch {
+        throw EngineError(
+          "cda_load_failed",
+          "AniRealism could not load on this iPhone: \(error.localizedDescription)"
+        )
+      }
+    } else {
+      cdaRuntime = nil
+    }
     var previousAnimeFrame: CGImage?
     var previousCdaFrame: CGImage?
     var currentSample = readerOutput.copyNextSampleBuffer()
@@ -564,7 +587,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         let frameLimit: CGFloat? = engine == "animeUltra"
           ? CGFloat(efficient ? 480 : 640)
           : (engine == "realism"
-            ? CGFloat(efficient ? 384 : 480)
+            ? CGFloat(efficient ? 320 : 384)
             : (efficient ? 960 : nil))
         let frameImage = try preparedVideoFrame(
           sample,
@@ -606,9 +629,12 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           if let previousCdaFrame, isSceneCut(previousCdaFrame, frameImage) {
             cdaState.reset()
           }
-          if cdaState.framesSinceReset >= 25 { cdaState.reset() }
+          if cdaState.framesSinceReset >= 12 { cdaState.reset() }
           let inferenceStarted = ProcessInfo.processInfo.systemUptime
-          enhancedImage = try cdaEngine.process(
+          guard let cdaRuntime else {
+            throw EngineError("cda_load_failed", "AniRealism is unavailable on this iPhone.")
+          }
+          enhancedImage = try cdaRuntime.process(
             previous: previousCdaFrame,
             current: frameImage,
             state: cdaState
@@ -619,6 +645,9 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           )
           emitProgress(min(0.92, frameStart + frameStep))
         } else {
+          guard let selectedModel else {
+            throw EngineError("invalid_model", "The selected video engine is unavailable.")
+          }
           let enhanced = try upscale(
             image: UIImage(cgImage: frameImage),
             requestedScale: aiScale,

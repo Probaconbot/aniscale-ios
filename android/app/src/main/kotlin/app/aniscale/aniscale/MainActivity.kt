@@ -77,20 +77,38 @@ class MainActivity : FlutterActivity() {
         }
         animeEnvironment.createSession(model, options)
     }
+    @Volatile private var activeCdaSession: OrtSession? = null
+    @Volatile private var activeCdaAsset: String? = null
+
+    @Synchronized
     private fun cdaSession(assetName: String): OrtSession {
+        if (activeCdaAsset == assetName) {
+            activeCdaSession?.let { return it }
+        }
+        activeCdaSession?.close()
+        activeCdaSession = null
+        activeCdaAsset = null
         val options = OrtSession.SessionOptions().apply {
             setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
             setIntraOpNumThreads(2)
             setInterOpNumThreads(1)
         }
-        val model = assets.open("models/$assetName").use { it.readBytes() }
-        return animeEnvironment.createSession(model, options)
-    }
-    private val cdaInitializerSession by lazy {
-        cdaSession("AniRealism_cda_vsr_initializer.onnx")
-    }
-    private val cdaRecurrentSession by lazy {
-        cdaSession("AniRealism_cda_vsr_recurrent.onnx")
+        val modelDirectory = File(filesDir, "onnx_models").apply { mkdirs() }
+        val modelFile = File(modelDirectory, assetName)
+        if (!modelFile.exists() || modelFile.length() == 0L) {
+            val temporary = File(modelDirectory, "$assetName.tmp")
+            assets.open("models/$assetName").use { input ->
+                FileOutputStream(temporary).use { output -> input.copyTo(output) }
+            }
+            if (!temporary.renameTo(modelFile)) {
+                temporary.copyTo(modelFile, overwrite = true)
+                temporary.delete()
+            }
+        }
+        return animeEnvironment.createSession(modelFile.absolutePath, options).also {
+            activeCdaSession = it
+            activeCdaAsset = assetName
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -113,6 +131,11 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         cancelled.set(true)
         worker.shutdownNow()
+        synchronized(this) {
+            activeCdaSession?.close()
+            activeCdaSession = null
+            activeCdaAsset = null
+        }
         super.onDestroy()
     }
 
@@ -240,10 +263,7 @@ class MainActivity : FlutterActivity() {
             try {
                 when (engine) {
                     "animeUltra" -> animeSession
-                    "realism" -> {
-                        cdaInitializerSession
-                        cdaRecurrentSession
-                    }
+                    "realism" -> Unit
                     else -> ensureModels()
                 }
                 val response = processVideo(
@@ -301,7 +321,7 @@ class MainActivity : FlutterActivity() {
             if (engine == "turbo") 480 else 384
         } else when (engine) {
             "animeUltra" -> if (efficient) 360 else 480
-            "realism" -> if (efficient) 384 else 480
+            "realism" -> if (efficient) 320 else 384
             "superUltra" -> if (efficient) 720 else 960
             "turbo" -> if (efficient) 720 else 960
             "render" -> if (efficient) 640 else 896
@@ -460,7 +480,7 @@ class MainActivity : FlutterActivity() {
                     if (previousCdaFrame != null && isSceneCut(previousCdaFrame!!, rgba)) {
                         cdaState.reset()
                     }
-                    if (cdaState.framesSinceReset >= 25) cdaState.reset()
+                    if (cdaState.framesSinceReset >= 12) cdaState.reset()
                     val enhanced = upscaleCda(previousCdaFrame, rgba, cdaState)
                     previousCdaFrame?.recycle()
                     previousCdaFrame = rgba
@@ -788,7 +808,7 @@ class MainActivity : FlutterActivity() {
                 FloatBuffer.wrap(frame),
                 inputShape,
             ).use { frameTensor ->
-                cdaInitializerSession.run(
+                cdaSession("AniRealism_cda_vsr_initializer.onnx").run(
                     mapOf("frame" to frameTensor),
                     outputNames,
                 )
@@ -820,7 +840,7 @@ class MainActivity : FlutterActivity() {
                                 FloatBuffer.wrap(state.high),
                                 longArrayOf(1, 64, height.toLong(), width.toLong()),
                             ).use { highTensor ->
-                                cdaRecurrentSession.run(
+                                cdaSession("AniRealism_cda_vsr_recurrent.onnx").run(
                                     mapOf(
                                         "frame" to frameTensor,
                                         "motion" to motionTensor,
@@ -837,18 +857,36 @@ class MainActivity : FlutterActivity() {
             }
         }
         result.use {
-            @Suppress("UNCHECKED_CAST")
-            val output = it.get("output").orElseThrow().value as Array<Array<Array<FloatArray>>>
-            @Suppress("UNCHECKED_CAST")
-            val nextLow = it.get("next_state_low").orElseThrow().value as Array<Array<Array<FloatArray>>>
-            @Suppress("UNCHECKED_CAST")
-            val nextHigh = it.get("next_state_high").orElseThrow().value as Array<Array<Array<FloatArray>>>
-            val outputChannels = output[0]
-            state.low = flattenChannels(nextLow[0], 64, height, width)
-            state.high = flattenChannels(nextHigh[0], 64, height, width)
+            val output = tensorFloats(it.get("output").orElseThrow() as OnnxTensor)
+            state.low = tensorFloats(it.get("next_state_low").orElseThrow() as OnnxTensor)
+            state.high = tensorFloats(it.get("next_state_high").orElseThrow() as OnnxTensor)
             state.framesSinceReset++
-            return bitmapFromChannels(outputChannels, width * 4, height * 4)
+            return bitmapFromPlanar(output, width * 4, height * 4)
         }
+    }
+
+    private fun tensorFloats(tensor: OnnxTensor): FloatArray {
+        val buffer = tensor.floatBuffer
+            ?: error("CDA-VSR returned a non-float tensor.")
+        buffer.rewind()
+        return FloatArray(buffer.remaining()).also { buffer.get(it) }
+    }
+
+    private fun bitmapFromPlanar(
+        channels: FloatArray,
+        width: Int,
+        height: Int,
+    ): Bitmap {
+        val plane = width * height
+        require(channels.size >= plane * 3) { "CDA-VSR returned an invalid output shape." }
+        val pixels = IntArray(plane)
+        for (index in 0 until plane) {
+            val red = (channels[index].coerceIn(0f, 1f) * 255).roundToInt()
+            val green = (channels[plane + index].coerceIn(0f, 1f) * 255).roundToInt()
+            val blue = (channels[plane * 2 + index].coerceIn(0f, 1f) * 255).roundToInt()
+            pixels[index] = (0xff shl 24) or (red shl 16) or (green shl 8) or blue
+        }
+        return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
     }
 
     private fun bitmapFromChannels(

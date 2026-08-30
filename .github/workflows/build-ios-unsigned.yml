@@ -15,7 +15,7 @@ on:
         description: Private test version label
         required: false
         type: string
-        default: 1.15.0-cda-test.1
+        default: 1.15.0-cda-test.2
 
 permissions:
   contents: write
@@ -360,7 +360,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TEST_VERSION: ${{ inputs.version || '1.15.0-cda-test.1' }}
+          TEST_VERSION: ${{ inputs.version || '1.15.0-cda-test.2' }}
         run: |
           set -euo pipefail
           test -n "$TEST_VERSION"
@@ -375,6 +375,8 @@ jobs:
           - Adds AniRealism Test using CDA-VSR recurrent initializer/frame graphs.
           - Preserves recurrent state between frames and resets at detected scene cuts.
           - Uses decoded-frame motion/residual estimates for this first mobile test.
+          - Fixes launch-time memory pressure by loading one CDA-VSR graph at a time.
+          - Adds iOS Core ML fallback and flat Android tensor extraction to prevent tap-to-upscale crashes.
           - Raises AniUltraAnime working resolution to preserve substantially more linework and texture.
           - Includes unsigned iOS IPA and Android APK.
 

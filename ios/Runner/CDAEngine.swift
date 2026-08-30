@@ -18,20 +18,13 @@ final class CDAEngine {
   }
 
   private let environment: ORTEnv
-  private let initializer: ORTSession
-  private let recurrent: ORTSession
+  private let initializerURL: URL
+  private let recurrentURL: URL
+  private var activeSession: ORTSession?
+  private var activeModelPath: String?
 
   init() throws {
     environment = try ORTEnv(loggingLevel: .warning)
-    let options = try ORTSessionOptions()
-    try options.setIntraOpNumThreads(2)
-    try options.setGraphOptimizationLevel(.all)
-    if ORTIsCoreMLExecutionProviderAvailable() {
-      let coreML = ORTCoreMLExecutionProviderOptions()
-      coreML.enableOnSubgraphs = true
-      coreML.createMLProgram = true
-      try options.appendCoreMLExecutionProvider(with: coreML)
-    }
     guard
       let initializerURL = Bundle.main.url(
         forResource: "AniRealism_cda_vsr_initializer",
@@ -48,16 +41,8 @@ final class CDAEngine {
         userInfo: [NSLocalizedDescriptionKey: "AniRealism test models are missing."]
       )
     }
-    initializer = try ORTSession(
-      env: environment,
-      modelPath: initializerURL.path,
-      sessionOptions: options
-    )
-    recurrent = try ORTSession(
-      env: environment,
-      modelPath: recurrentURL.path,
-      sessionOptions: options
-    )
+    self.initializerURL = initializerURL
+    self.recurrentURL = recurrentURL
   }
 
   func process(previous: CGImage?, current: CGImage, state: State) throws -> CGImage {
@@ -95,7 +80,7 @@ final class CDAEngine {
         elementType: .float,
         shape: [1, 64, NSNumber(value: height), NSNumber(value: width)]
       )
-      outputs = try recurrent.run(
+      outputs = try session(for: recurrentURL).run(
         withInputs: [
           "frame": frameValue,
           "motion": motionValue,
@@ -107,7 +92,7 @@ final class CDAEngine {
         runOptions: nil
       )
     } else {
-      outputs = try initializer.run(
+      outputs = try session(for: initializerURL).run(
         withInputs: ["frame": frameValue],
         outputNames: names,
         runOptions: nil
@@ -132,6 +117,49 @@ final class CDAEngine {
       width: width * 4,
       height: height * 4
     )
+  }
+
+  /// CDA-VSR's two graphs are large. Keeping both ORT sessions resident caused
+  /// iOS to terminate the app at the moment the user tapped Upscale. Retain only
+  /// the graph needed for the current frame and fall back to CPU if Core ML
+  /// cannot compile a graph on a particular device.
+  private func session(for modelURL: URL) throws -> ORTSession {
+    if activeModelPath == modelURL.path, let activeSession {
+      return activeSession
+    }
+    activeSession = nil
+    activeModelPath = nil
+
+    let created: ORTSession
+    do {
+      created = try ORTSession(
+        env: environment,
+        modelPath: modelURL.path,
+        sessionOptions: try sessionOptions(useCoreML: true)
+      )
+    } catch {
+      created = try ORTSession(
+        env: environment,
+        modelPath: modelURL.path,
+        sessionOptions: try sessionOptions(useCoreML: false)
+      )
+    }
+    activeSession = created
+    activeModelPath = modelURL.path
+    return created
+  }
+
+  private func sessionOptions(useCoreML: Bool) throws -> ORTSessionOptions {
+    let options = try ORTSessionOptions()
+    try options.setIntraOpNumThreads(2)
+    try options.setGraphOptimizationLevel(.all)
+    if useCoreML && ORTIsCoreMLExecutionProviderAvailable() {
+      let coreML = ORTCoreMLExecutionProviderOptions()
+      coreML.enableOnSubgraphs = true
+      coreML.createMLProgram = true
+      try options.appendCoreMLExecutionProvider(with: coreML)
+    }
+    return options
   }
 
   private func tensor(_ values: [Float], shape: [NSNumber]) throws -> ORTValue {
