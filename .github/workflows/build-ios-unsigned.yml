@@ -15,7 +15,7 @@ on:
         description: Private test version label
         required: false
         type: string
-        default: 1.15.0-cda-test.2
+        default: 1.15.0-cda-test.3
 
 permissions:
   contents: write
@@ -360,7 +360,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TEST_VERSION: ${{ inputs.version || '1.15.0-cda-test.2' }}
+          TEST_VERSION: ${{ inputs.version || '1.15.0-cda-test.3' }}
         run: |
           set -euo pipefail
           test -n "$TEST_VERSION"
@@ -377,6 +377,8 @@ jobs:
           - Uses decoded-frame motion/residual estimates for this first mobile test.
           - Fixes launch-time memory pressure by loading one CDA-VSR graph at a time.
           - Adds iOS Core ML fallback and flat Android tensor extraction to prevent tap-to-upscale crashes.
+          - Disables unsafe on-device Core ML compilation for flexible CDA graphs on iOS.
+          - Defers the full-resolution encoder buffer until inference temporaries are released.
           - Raises AniUltraAnime working resolution to preserve substantially more linework and texture.
           - Includes unsigned iOS IPA and Android APK.
 

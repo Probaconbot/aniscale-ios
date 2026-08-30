@@ -119,10 +119,11 @@ final class CDAEngine {
     )
   }
 
-  /// CDA-VSR's two graphs are large. Keeping both ORT sessions resident caused
-  /// iOS to terminate the app at the moment the user tapped Upscale. Retain only
-  /// the graph needed for the current frame and fall back to CPU if Core ML
-  /// cannot compile a graph on a particular device.
+  /// CDA-VSR's two flexible-shape graphs are large. Keep only the graph needed
+  /// for the current frame. Do not ask Core ML to compile these ONNX graphs on
+  /// device: on several iPhones that compilation is terminated by iOS jetsam
+  /// before ORT can return a catchable error. The CPU provider is slower but has
+  /// a bounded, predictable memory footprint for this private compatibility test.
   private func session(for modelURL: URL) throws -> ORTSession {
     if activeModelPath == modelURL.path, let activeSession {
       return activeSession
@@ -130,35 +131,20 @@ final class CDAEngine {
     activeSession = nil
     activeModelPath = nil
 
-    let created: ORTSession
-    do {
-      created = try ORTSession(
-        env: environment,
-        modelPath: modelURL.path,
-        sessionOptions: try sessionOptions(useCoreML: true)
-      )
-    } catch {
-      created = try ORTSession(
-        env: environment,
-        modelPath: modelURL.path,
-        sessionOptions: try sessionOptions(useCoreML: false)
-      )
-    }
+    let created = try ORTSession(
+      env: environment,
+      modelPath: modelURL.path,
+      sessionOptions: try sessionOptions()
+    )
     activeSession = created
     activeModelPath = modelURL.path
     return created
   }
 
-  private func sessionOptions(useCoreML: Bool) throws -> ORTSessionOptions {
+  private func sessionOptions() throws -> ORTSessionOptions {
     let options = try ORTSessionOptions()
-    try options.setIntraOpNumThreads(2)
+    try options.setIntraOpNumThreads(1)
     try options.setGraphOptimizationLevel(.all)
-    if useCoreML && ORTIsCoreMLExecutionProviderAvailable() {
-      let coreML = ORTCoreMLExecutionProviderOptions()
-      coreML.enableOnSubgraphs = true
-      coreML.createMLProgram = true
-      try options.appendCoreMLExecutionProvider(with: coreML)
-    }
     return options
   }
 

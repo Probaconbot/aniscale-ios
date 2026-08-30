@@ -566,28 +566,17 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         if isCancelled() { break }
         Thread.sleep(forTimeInterval: 0.004)
       }
-      guard
-        let pool = adaptor.pixelBufferPool
-      else {
-        throw EngineError("video_encode_failed", "The output pixel buffer pool is unavailable.")
-      }
-      var outputBuffer: CVPixelBuffer?
-      guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &outputBuffer) == kCVReturnSuccess,
-            let outputBuffer else {
-        throw EngineError("video_memory", "The iPhone ran out of video processing memory.")
-      }
-
       let timestamp = CMSampleBufferGetPresentationTimeStamp(sample)
       let frameStart = min(0.92, max(0.01, CMTimeGetSeconds(timestamp) / durationSeconds * 0.92))
       let frameStep = 0.92 / max(
         1,
         durationSeconds * Double(max(videoTrack.nominalFrameRate, 1))
       )
-      try autoreleasepool {
+      let enhancedImage: CGImage = try autoreleasepool {
         let frameLimit: CGFloat? = engine == "animeUltra"
           ? CGFloat(efficient ? 480 : 640)
           : (engine == "realism"
-            ? CGFloat(efficient ? 320 : 384)
+            ? CGFloat(efficient ? 256 : 320)
             : (efficient ? 960 : nil))
         let frameImage = try preparedVideoFrame(
           sample,
@@ -673,7 +662,22 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           }
           enhancedImage = enhancedValue as! CGImage
         }
-        processedFrames += 1
+        return enhancedImage
+      }
+      processedFrames += 1
+
+      // Allocate the potentially 4K encoder buffer only after model inference
+      // temporaries have left their autorelease pool. Holding it during CDA-VSR
+      // inference added tens of megabytes to the peak and triggered iOS jetsam.
+      guard let pool = adaptor.pixelBufferPool else {
+        throw EngineError("video_encode_failed", "The output pixel buffer pool is unavailable.")
+      }
+      var outputBuffer: CVPixelBuffer?
+      guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &outputBuffer) == kCVReturnSuccess,
+            let outputBuffer else {
+        throw EngineError("video_memory", "The iPhone ran out of video processing memory.")
+      }
+      autoreleasepool {
         var enhancedFrame = CIImage(cgImage: enhancedImage)
         let fitScale = min(
           CGFloat(outputWidth) / enhancedFrame.extent.width,
