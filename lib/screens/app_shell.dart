@@ -8,12 +8,14 @@ import 'package:flutter/services.dart';
 import 'package:gal/gal.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 
 import '../models/app_settings.dart';
 import '../models/enhancement.dart';
 import '../services/upscale_service.dart';
+import '../services/cloud_video_service.dart';
 import '../services/history_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/liquid_glass_surface.dart';
@@ -292,7 +294,9 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
   int _scale = 2;
   double _targetScale = 2;
   late int _performance;
-  _VideoEngine _engine = _VideoEngine.fusion;
+  _VideoEngine _engine = _VideoEngine.animeUltra;
+  bool _cloud = true;
+  late final TextEditingController _cloudToken;
   int _content = 0;
   int _detailMode = 0;
   int _codec = 0;
@@ -301,13 +305,22 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
   void initState() {
     super.initState();
     _performance = widget.settings.performance == 1 ? 1 : 0;
+    _cloudToken = TextEditingController(text: CloudVideoSession.token);
+  }
+
+  @override
+  void dispose() {
+    _cloudToken.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final file = File(widget.inputPath);
     final filename = widget.inputPath.split(Platform.pathSeparator).last;
-    final engines = Platform.isAndroid || Platform.isIOS
+    final engines = _cloud
+        ? [_VideoEngine.animeUltra]
+        : Platform.isAndroid || Platform.isIOS
         ? _VideoEngine.values
         : _VideoEngine.values
               .where((engine) => engine != _VideoEngine.superUltra)
@@ -366,7 +379,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                         if (!snapshot.hasData) return const SizedBox.shrink();
                         final megabytes = snapshot.data! / (1024 * 1024);
                         return Text(
-                          '${megabytes.toStringAsFixed(1)} MB • kept on this device',
+                          '${megabytes.toStringAsFixed(1)} MB • ${_cloud ? 'uploads when you start' : 'kept on this device'}',
                           style: const TextStyle(
                             color: AniColors.mutedText,
                             fontSize: 12,
@@ -377,6 +390,61 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                   ],
                 ),
               ),
+              const SizedBox(height: 18),
+              const ControlLabel('PROCESSING LOCATION'),
+              const SizedBox(height: 9),
+              SegmentedGlass(
+                labels: const ['Hugging Face GPU', 'On device'],
+                selected: _cloud ? 0 : 1,
+                onSelected: (index) => setState(() {
+                  _cloud = index == 0;
+                  if (_cloud) _engine = _VideoEngine.animeUltra;
+                }),
+              ),
+              if (_cloud) ...[
+                const SizedBox(height: 14),
+                GlassCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Private AniUltraAnime GPU',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Lushus6pg/aniscale-video\nFree GPU test: up to 10 seconds, 720p, 100 MB. Daily GPU quota applies. Other engines remain on-device.',
+                        style: TextStyle(
+                          color: AniColors.secondaryText,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _cloudToken,
+                        obscureText: true,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        decoration: const InputDecoration(
+                          labelText: 'Hugging Face read token',
+                          hintText: 'hf_…',
+                        ),
+                        onChanged: (value) {
+                          CloudVideoSession.token = value.trim();
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Use a read token with access to this private Space. Kept in memory until the app closes.',
+                        style: TextStyle(
+                          color: AniColors.mutedText,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 18),
               const ControlLabel('VIDEO ENGINE'),
               const SizedBox(height: 9),
@@ -479,25 +547,27 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                   onSelected: (index) => setState(() => _codec = index),
                 ),
               ],
-              const SizedBox(height: 18),
-              const ControlLabel('AI PERFORMANCE'),
-              const SizedBox(height: 9),
-              SegmentedGlass(
-                labels: const ['Efficient', 'Maximum'],
-                selected: _performance,
-                onSelected: (index) => setState(() => _performance = index),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _performance == 0
-                    ? 'Recommended: lower heat and faster processing with a quality-preserving working resolution.'
-                    : 'Higher neural working resolution. Slower, with higher memory and battery use.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: AniColors.mutedText,
-                  fontSize: 11,
+              if (!_cloud) ...[
+                const SizedBox(height: 18),
+                const ControlLabel('AI PERFORMANCE'),
+                const SizedBox(height: 9),
+                SegmentedGlass(
+                  labels: const ['Efficient', 'Maximum'],
+                  selected: _performance,
+                  onSelected: (index) => setState(() => _performance = index),
                 ),
-              ),
+                const SizedBox(height: 8),
+                Text(
+                  _performance == 0
+                      ? 'Recommended: lower heat and faster processing with a quality-preserving working resolution.'
+                      : 'Higher neural working resolution. Slower, with higher memory and battery use.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: AniColors.mutedText,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
               const SizedBox(height: 18),
               GlassCard(
                 child: ListTile(
@@ -515,29 +585,38 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                     _VideoEngine.realism => 'AniRealism Test — CDA-VSR',
                   }),
                   subtitle: Text(
-                    '${switch (_engine) {
-                      _VideoEngine.superUltra => Platform.isIOS ? 'Core ML/Metal FP16' : 'ncnn Vulkan FP16',
-                      _VideoEngine.animeUltra => Platform.isIOS ? 'Core ML recurrent VSR' : 'ONNX Runtime recurrent VSR',
-                      _VideoEngine.realism => 'ONNX Runtime recurrent CDA-VSR',
-                      _ => Platform.isIOS ? 'Core ML' : 'ncnn Vulkan',
-                    }} processes locally. Original audio is preserved and oversized results fit a safe 4K output.',
+                    _cloud
+                        ? 'AnimeSR runs on the Hugging Face GPU, not your phone. Full input resolution, recurrent state and original audio are preserved. Output fits within 4K.'
+                        : '${switch (_engine) {
+                            _VideoEngine.superUltra => Platform.isIOS ? 'Core ML/Metal FP16' : 'ncnn Vulkan FP16',
+                            _VideoEngine.animeUltra => Platform.isIOS ? 'Core ML recurrent VSR' : 'ONNX Runtime recurrent VSR',
+                            _VideoEngine.realism => 'ONNX Runtime recurrent CDA-VSR',
+                            _ => Platform.isIOS ? 'Core ML' : 'ncnn Vulkan',
+                          }} processes locally. Original audio is preserved and oversized results fit a safe 4K output.',
                   ),
                 ),
               ),
               const SizedBox(height: 14),
-              const Text(
-                'Your video was selected locally and was never uploaded.',
+              Text(
+                _cloud
+                    ? 'Starting uploads this video to your private Hugging Face Space. Temporary files expire within about one hour. No silent on-device fallback.'
+                    : 'Your video stays on this device in local mode.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: AniColors.mutedText, fontSize: 12),
+                style: const TextStyle(
+                  color: AniColors.mutedText,
+                  fontSize: 12,
+                ),
               ),
             ],
           ),
         ),
       ),
       bottomNavigationBar: BottomAction(
-        label: 'Start Video Upscaling',
-        note: 'Real AI processes every frame. Keep AniScale open; this can take a while.',
-        onPressed: Platform.isIOS || Platform.isAndroid
+        label: _cloud ? 'Upload & Upscale on GPU' : 'Start Video Upscaling',
+        note: _cloud
+            ? 'Keep AniScale open for upload, progress, and download.'
+            : 'Real AI processes every frame. Keep AniScale open; this can take a while.',
+        onPressed: _cloud || Platform.isIOS || Platform.isAndroid
             ? () => Navigator.of(context).push(
                 MaterialPageRoute<void>(
                   builder: (_) => VideoProcessingScreen(
@@ -549,6 +628,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                     efficient: _performance == 0,
                     tileSize: widget.settings.engineTileSize,
                     engine: _engine.name,
+                    cloudToken: _cloud ? CloudVideoSession.token : null,
                     content: const ['auto', 'live', 'anime'][_content],
                     detailMode: const [
                       'natural',
@@ -579,6 +659,7 @@ class VideoProcessingScreen extends StatefulWidget {
     required this.detailMode,
     required this.codec,
     required this.onEnhanced,
+    this.cloudToken,
   });
 
   final String inputPath;
@@ -590,6 +671,7 @@ class VideoProcessingScreen extends StatefulWidget {
   final String content;
   final String detailMode;
   final String codec;
+  final String? cloudToken;
   final ValueChanged<Enhancement> onEnhanced;
 
   @override
@@ -600,6 +682,9 @@ class _VideoProcessingScreenState extends State<VideoProcessingScreen> {
   double _progress = .01;
   bool _cancelled = false;
   StreamSubscription<double>? _subscription;
+  CloudVideoService? _cloudService;
+  String _stage = 'Connecting…';
+  bool _completed = false;
 
   @override
   void initState() {
@@ -608,24 +693,52 @@ class _VideoProcessingScreenState extends State<VideoProcessingScreen> {
   }
 
   Future<void> _run() async {
-    _subscription = upscaleProgress.listen((value) {
-      if (mounted && !_cancelled) {
-        setState(() => _progress = value.clamp(.01, 1));
-      }
-    });
+    if (widget.cloudToken == null) {
+      _subscription = upscaleProgress.listen((value) {
+        if (mounted && !_cancelled) {
+          setState(() => _progress = value.clamp(.01, 1));
+        }
+      });
+    }
     try {
-      final result = await upscaleVideoLocally(
-        path: widget.inputPath,
-        scale: widget.scale,
-        targetScale: widget.targetScale,
-        efficient: widget.efficient,
-        tileSize: widget.tileSize,
-        engine: widget.engine,
-        content: widget.content,
-        detailMode: widget.detailMode,
-        codec: widget.codec,
-      );
+      final VideoUpscaleResult result;
+      if (widget.cloudToken != null) {
+        final cloud = _cloudService = CloudVideoService(
+          endpoint: CloudVideoSession.endpoint,
+          token: widget.cloudToken!,
+        );
+        final directory = await getApplicationSupportDirectory();
+        if (_cancelled || !mounted) return;
+        result = await cloud.run(
+          path: widget.inputPath,
+          scale: widget.scale,
+          detail: widget.detailMode,
+          codec: widget.codec,
+          outputDirectory: Directory('${directory.path}/enhancements'),
+          onProgress: (progress) {
+            if (mounted && !_cancelled) {
+              setState(() {
+                _progress = progress.fraction;
+                _stage = progress.stage;
+              });
+            }
+          },
+        );
+      } else {
+        result = await upscaleVideoLocally(
+          path: widget.inputPath,
+          scale: widget.scale,
+          targetScale: widget.targetScale,
+          efficient: widget.efficient,
+          tileSize: widget.tileSize,
+          engine: widget.engine,
+          content: widget.content,
+          detailMode: widget.detailMode,
+          codec: widget.codec,
+        );
+      }
       if (!mounted || _cancelled) return;
+      _completed = true;
       widget.onEnhanced(
         Enhancement(
           originalPath: widget.inputPath,
@@ -648,7 +761,9 @@ class _VideoProcessingScreenState extends State<VideoProcessingScreen> {
       );
     } catch (error) {
       if (!mounted || _cancelled) return;
-      final detail = error is PlatformException && error.message != null
+      final detail = error is CloudVideoException
+          ? error.message
+          : error is PlatformException && error.message != null
           ? error.message!
           : 'Try a shorter or lower-resolution video.';
       ScaffoldMessenger.of(context).showSnackBar(
@@ -661,6 +776,7 @@ class _VideoProcessingScreenState extends State<VideoProcessingScreen> {
   @override
   void dispose() {
     _subscription?.cancel();
+    if (!_completed) unawaited(_cloudService?.cancel());
     super.dispose();
   }
 
@@ -709,19 +825,23 @@ class _VideoProcessingScreenState extends State<VideoProcessingScreen> {
                         ),
                       ),
                       const SizedBox(height: 24),
-                      const Text(
-                        'AI-cleaning video frames…',
+                      Text(
+                        widget.cloudToken == null
+                            ? 'AI-cleaning video frames…'
+                            : _stage,
                         textAlign: TextAlign.center,
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 21,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
                       const SizedBox(height: 9),
-                      const Text(
-                        'Audio will be added back during the finishing stage.',
+                      Text(
+                        widget.cloudToken == null
+                            ? 'Audio will be added back during the finishing stage.'
+                            : 'Neural processing runs on Hugging Face GPU. Your phone uploads and downloads the video.',
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: AniColors.secondaryText),
+                        style: const TextStyle(color: AniColors.secondaryText),
                       ),
                     ],
                   ),
@@ -730,7 +850,11 @@ class _VideoProcessingScreenState extends State<VideoProcessingScreen> {
                 TextButton(
                   onPressed: () async {
                     _cancelled = true;
-                    await cancelUpscale();
+                    if (_cloudService != null) {
+                      await _cloudService!.cancel();
+                    } else if (widget.cloudToken == null) {
+                      await cancelUpscale();
+                    }
                     if (context.mounted) Navigator.of(context).pop();
                   },
                   child: const Text('Cancel'),
@@ -795,7 +919,7 @@ class _VideoResultScreenState extends State<VideoResultScreen> {
     await SharePlus.instance.share(
       ShareParams(
         files: [XFile(widget.result.path)],
-        text: 'Enhanced locally with AniScale',
+        text: 'Enhanced with AniScale',
       ),
     );
   }
@@ -827,10 +951,12 @@ class _VideoResultScreenState extends State<VideoResultScreen> {
                 style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Enhanced locally with the original audio preserved.',
+              Text(
+                result.engine.contains('Hugging Face')
+                    ? 'Enhanced on Hugging Face GPU with original audio preserved.'
+                    : 'Enhanced locally with the original audio preserved.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: AniColors.secondaryText),
+                style: const TextStyle(color: AniColors.secondaryText),
               ),
               const SizedBox(height: 24),
               LiquidGlassSurface(
@@ -2469,7 +2595,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             leading: Icon(Icons.shield_outlined, color: AniColors.success),
             title: Text('Private by design'),
             subtitle: Text(
-              'Upscaling stays on-device. Assistant prompts and an attached preview are sent to Groq only when you tap send.',
+              'On-device mode keeps media local. Hugging Face GPU mode uploads your video only when you start. Assistant prompts and an attached preview are sent to Groq only when you tap send.',
             ),
           ),
         ),
@@ -2880,7 +3006,9 @@ class UploadCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            videoMode ? 'MP4 or MOV. Processed offline.' : 'PNG, JPG, or WebP.',
+            videoMode
+                ? 'MP4 or MOV. Choose local or private cloud.'
+                : 'PNG, JPG, or WebP.',
             style: const TextStyle(color: AniColors.mutedText),
           ),
           const SizedBox(height: 24),

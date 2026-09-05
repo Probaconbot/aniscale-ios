@@ -15,7 +15,7 @@ on:
         description: Private test version label
         required: false
         type: string
-        default: 1.15.0-cda-test.6
+        default: 1.15.1-cloud-test.1
 
 permissions:
   contents: write
@@ -33,7 +33,7 @@ jobs:
       - name: Validate video training assets
         shell: bash
         run: |
-          python3 -m compileall -q training
+          python3 -m compileall -q training cloud
           python3 training/validate_assets.py
 
       - name: Install Flutter stable
@@ -360,7 +360,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TEST_VERSION: ${{ inputs.version || '1.15.0-cda-test.6' }}
+          TEST_VERSION: ${{ inputs.version || '1.15.1-cloud-test.1' }}
         run: |
           set -euo pipefail
           test -n "$TEST_VERSION"
@@ -385,7 +385,13 @@ jobs:
           - Adds anime-specific detail finishing and flat Android tensor extraction.
           - Refines shared Liquid Glass with curved edge reflections and touch-following light while retaining the existing layout, tabs, and controls.
           - Isolates glass repaints from content, fixes touch positioning on tall cards, and respects system and app reduced-motion settings.
-          - Hugging Face remote inference is not configured in this build; existing models still run locally.
+          - Connects AniUltraAnime to the private Lushus6pg/aniscale-video Hugging Face ZeroGPU Space.
+          - Adds explicit Hugging Face GPU / On device selection without changing the existing design.
+          - Streams upload, server progress, cancellation, and finished-video download on Android and iOS.
+          - Cloud mode never falls back to local neural processing. Other engines remain on-device.
+          - Requires your Space-authorized Hugging Face token, kept in app memory and never bundled.
+          - Free GPU test limits: SDR anime clips up to 10 seconds, 720p, 100 MB; daily GPU quota applies.
+          - Verified a real GPU round trip through the app transport, 29.97 FPS preservation and bit-identical copied audio on a synthetic test clip. This is not a full-size performance/quality benchmark or an actual iPhone device benchmark.
           - Includes unsigned iOS IPA and Android APK.
 
           CDA-VSR upstream licensing is not specified. These binaries are for private evaluation only and must not be published or redistributed.
@@ -394,5 +400,5 @@ jobs:
             "$IOS_FILE" "$ANDROID_FILE" SHA256SUMS.txt \
             --draft \
             --target "${GITHUB_SHA}" \
-            --title "AniScale ${TEST_VERSION} — Private CDA-VSR Test" \
+            --title "AniScale ${TEST_VERSION} — Private GPU Connection Test" \
             --notes-file "$RUNNER_TEMP/private-test-notes.md"
