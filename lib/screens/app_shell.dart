@@ -16,6 +16,7 @@ import '../models/enhancement.dart';
 import '../services/upscale_service.dart';
 import '../services/history_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/liquid_glass_surface.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -95,7 +96,10 @@ class _AppShellState extends State<AppShell> {
 
     final mediaQuery = MediaQuery.of(context);
     return MediaQuery(
-      data: mediaQuery.copyWith(disableAnimations: _settings.reduceMotion),
+      data: mediaQuery.copyWith(
+        disableAnimations:
+            mediaQuery.disableAnimations || _settings.reduceMotion,
+      ),
       child: Scaffold(
         extendBody: true,
         body: AmbientBackground(
@@ -2612,168 +2616,6 @@ class GlassCard extends StatelessWidget {
   }
 }
 
-/// A route-safe material surface rendered inside Flutter's scene.
-class LiquidGlassSurface extends StatefulWidget {
-  const LiquidGlassSurface({
-    super.key,
-    required this.child,
-    this.borderRadius = 18,
-    this.padding = EdgeInsets.zero,
-    this.tint = const Color(0xD0101114),
-    this.blur = 8,
-  });
-
-  final Widget child;
-  final double borderRadius;
-  final EdgeInsetsGeometry padding;
-  final Color tint;
-  final double blur;
-
-  @override
-  State<LiquidGlassSurface> createState() => _LiquidGlassSurfaceState();
-}
-
-class _LiquidGlassSurfaceState extends State<LiquidGlassSurface> {
-  Offset _touch = Offset.zero;
-  bool _pressed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final radius = BorderRadius.circular(widget.borderRadius);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth.isFinite
-            ? constraints.maxWidth
-            : 320.0;
-        final height = constraints.maxHeight.isFinite
-            ? constraints.maxHeight
-            : 80.0;
-        final touchAlignment = Alignment(
-          ((_touch.dx / width) * 2 - 1).clamp(-1, 1),
-          ((_touch.dy / height) * 2 - 1).clamp(-1, 1),
-        );
-        return Listener(
-          behavior: HitTestBehavior.translucent,
-          onPointerDown: (event) => setState(() {
-            _touch = event.localPosition;
-            _pressed = true;
-          }),
-          onPointerMove: (event) =>
-              setState(() => _touch = event.localPosition),
-          onPointerUp: (_) => setState(() => _pressed = false),
-          onPointerCancel: (_) => setState(() => _pressed = false),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              borderRadius: radius,
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x4A000000),
-                  blurRadius: 30,
-                  offset: Offset(0, 14),
-                ),
-                BoxShadow(
-                  color: Color(0x14FFFFFF),
-                  blurRadius: 20,
-                  spreadRadius: -8,
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: radius,
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: _GlassBackdrop(tint: widget.tint, blur: widget.blur),
-                  ),
-                  Container(
-                    padding: widget.padding,
-                    decoration: BoxDecoration(
-                      borderRadius: radius,
-                      border: Border.all(color: const Color(0x42FFFFFF)),
-                      gradient: const LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          Color(0x24FFFFFF),
-                          Color(0x0BFFFFFF),
-                          Color(0x08000000),
-                        ],
-                      ),
-                    ),
-                    child: Stack(
-                      children: [
-                        Positioned(
-                          left: 12,
-                          right: 12,
-                          top: 0,
-                          child: IgnorePointer(
-                            child: Container(
-                              height: 1,
-                              decoration: BoxDecoration(
-                                gradient: const LinearGradient(
-                                  colors: [
-                                    Colors.transparent,
-                                    Color(0xD8FFFFFF),
-                                    Colors.transparent,
-                                  ],
-                                ),
-                                borderRadius: BorderRadius.circular(1),
-                              ),
-                            ),
-                          ),
-                        ),
-                        widget.child,
-                      ],
-                    ),
-                  ),
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: AnimatedOpacity(
-                        opacity: _pressed ? 1 : 0,
-                        duration: const Duration(milliseconds: 100),
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: RadialGradient(
-                              center: touchAlignment,
-                              radius: .85,
-                              colors: const [
-                                Color(0x32FFFFFF),
-                                Color(0x0CFFFFFF),
-                                Colors.transparent,
-                              ],
-                              stops: const [0, .34, 1],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _GlassBackdrop extends StatelessWidget {
-  const _GlassBackdrop({required this.tint, required this.blur});
-
-  final Color tint;
-  final double blur;
-
-  @override
-  Widget build(BuildContext context) {
-    final effectiveBlur = MediaQuery.disableAnimationsOf(context) ? 0.0 : blur;
-    return BackdropFilter(
-      filter: ImageFilter.blur(sigmaX: effectiveBlur, sigmaY: effectiveBlur),
-      child: ColoredBox(color: tint),
-    );
-  }
-}
-
 class LiquidGlassIconButton extends StatelessWidget {
   const LiquidGlassIconButton({
     super.key,
@@ -3229,7 +3071,7 @@ class FloatingNav extends StatelessWidget {
       minimum: const EdgeInsets.fromLTRB(18, 0, 18, 12),
       child: LiquidGlassSurface(
         borderRadius: 24,
-        tint: const Color(0xF0101114),
+        tint: const Color(0xD8101114),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
         child: SizedBox(
           height: 58,

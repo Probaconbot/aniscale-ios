@@ -15,7 +15,7 @@ on:
         description: Private test version label
         required: false
         type: string
-        default: 1.15.0-cda-test.5
+        default: 1.15.0-cda-test.6
 
 permissions:
   contents: write
@@ -360,7 +360,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TEST_VERSION: ${{ inputs.version || '1.15.0-cda-test.5' }}
+          TEST_VERSION: ${{ inputs.version || '1.15.0-cda-test.6' }}
         run: |
           set -euo pipefail
           test -n "$TEST_VERSION"
@@ -383,7 +383,9 @@ jobs:
           - Exposes Natural, Detailed, and Sharp controls for AniRealism on both platforms.
           - Raises AniUltraAnime's neural working resolution for genuinely more detailed 4K output.
           - Adds anime-specific detail finishing and flat Android tensor extraction.
-          - Raises AniUltraAnime working resolution to preserve substantially more linework and texture.
+          - Refines shared Liquid Glass with curved edge reflections and touch-following light while retaining the existing layout, tabs, and controls.
+          - Isolates glass repaints from content, fixes touch positioning on tall cards, and respects system and app reduced-motion settings.
+          - Hugging Face remote inference is not configured in this build; existing models still run locally.
           - Includes unsigned iOS IPA and Android APK.
 
           CDA-VSR upstream licensing is not specified. These binaries are for private evaluation only and must not be published or redistributed.
