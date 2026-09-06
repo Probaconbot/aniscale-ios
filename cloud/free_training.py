@@ -44,7 +44,7 @@ def run_training_session(domain: str, resume: str | None) -> tuple[str | None, d
             "--output", str(output),
             "--domain", domain,
             "--cache", str(ROOT / ".model-cache"),
-            "--session-seconds", "50",
+            "--session-seconds", "60",
             "--patch-size", "128",
             "--batch-size", "1",
             "--workers", "0",
@@ -61,7 +61,7 @@ def run_training_session(domain: str, resume: str | None) -> tuple[str | None, d
             cwd=ROOT,
             capture_output=True,
             text=True,
-            timeout=65,
+            timeout=75,
             check=False,
         )
         if completed.returncode != 0:
