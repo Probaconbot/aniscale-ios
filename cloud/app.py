@@ -52,10 +52,9 @@ def upscale(video, scale, detail, codec):
         yield None, {'error': 'Video decoding or audio remux failed. Try an SDR MP4 with AAC audio.', 'stage': 'Failed', 'progress': 0}
 
 
-@spaces.GPU(duration=90, size='large')
+@spaces.GPU(duration=8, size='large')
 def train_free(domain, resume):
-    # Leave time for checkpoint loading and a clean save around a bounded run.
-    # Two 90-second reservations remain below the free account's daily 5 minutes.
+    # A one-step bootstrap fits the remaining free quota; later sessions resume it.
     return run_training_session(domain, resume)
 
 
