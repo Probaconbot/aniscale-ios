@@ -15,7 +15,7 @@ on:
         description: Private test version label
         required: false
         type: string
-        default: 1.15.2-cloud-test.1
+        default: 1.15.3-training-test.1
 
 permissions:
   contents: write
@@ -360,7 +360,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TEST_VERSION: ${{ inputs.version || '1.15.2-cloud-test.1' }}
+          TEST_VERSION: ${{ inputs.version || '1.15.3-training-test.1' }}
         run: |
           set -euo pipefail
           test -n "$TEST_VERSION"
@@ -393,6 +393,9 @@ jobs:
           - Free GPU test limits: SDR anime clips up to 10 seconds, 1080p, 100 MB; daily GPU quota applies.
           - Fixes accidental default GPU allocation requests and scales reservation time to the actual shared hardware.
           - Shows the server's actual GPU quota/error message instead of discarding it behind a generic failure.
+          - Adds private, resumable anime and live-action fine-tuning with edge, detail, and temporal losses.
+          - Preserves the verified live-action GPU bootstrap checkpoint for automatic continuation after the free quota resets.
+          - Keeps private datasets and trained checkpoints out of the APK and IPA.
           - Verified a real GPU round trip through the app transport, 29.97 FPS preservation and bit-identical copied audio on a synthetic test clip. This is not a full-size performance/quality benchmark or an actual iPhone device benchmark.
           - Includes unsigned iOS IPA and Android APK.
 
@@ -402,5 +405,5 @@ jobs:
             "$IOS_FILE" "$ANDROID_FILE" SHA256SUMS.txt \
             --draft \
             --target "${GITHUB_SHA}" \
-            --title "AniScale ${TEST_VERSION} — Private GPU Connection Test" \
+            --title "AniScale ${TEST_VERSION} — Private Training Test" \
             --notes-file "$RUNNER_TEMP/private-test-notes.md"
