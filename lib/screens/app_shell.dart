@@ -413,7 +413,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Lushus6pg/aniscale-video\nFree GPU test: up to 10 seconds, 720p, 100 MB. Daily GPU quota applies. Other engines remain on-device.',
+                        'Lushus6pg/aniscale-video\nFree GPU test: up to 10 seconds, 1080p, 100 MB. Daily GPU quota applies. Other engines remain on-device.',
                         style: TextStyle(
                           color: AniColors.secondaryText,
                           fontSize: 12,

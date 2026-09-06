@@ -26,8 +26,8 @@ def inspect_video(path, scale):
     duration = float(stream.get('duration') or data['format'].get('duration') or 0)
     if not 0 < duration <= 10.05:
         raise ValueError('Free GPU mode currently accepts clips up to 10 seconds. Trim the video first.')
-    if max(w, h) > 1280 or min(w, h) > 720:
-        raise ValueError('Free GPU mode accepts inputs up to 1280×720 (or portrait equivalent).')
+    if max(w, h) > 1920 or min(w, h) > 1080:
+        raise ValueError('Free GPU mode accepts inputs up to 1920×1080 (or portrait equivalent).')
     if stream.get('color_transfer') in ('smpte2084', 'arib-std-b67'):
         raise ValueError('HDR input is not supported by this SDR AnimeSR checkpoint. Export an SDR copy first.')
     rotations = [int(stream.get('tags', {}).get('rotate', 0))]
@@ -40,6 +40,14 @@ def inspect_video(path, scale):
     ow, oh = max(2, int(w * ratio) // 2 * 2), max(2, int(h * ratio) // 2 * 2)
     return dict(originalWidth=w, originalHeight=h, outputWidth=ow, outputHeight=oh,
                 durationSeconds=duration, engine='AniUltraAnime • Hugging Face GPU')
+
+
+def gpu_duration(video, scale, detail, codec):
+    """Bounded allocation estimate; small clips must not request three minutes."""
+    import math
+    meta = inspect_video(video, int(scale))
+    seconds = 15 + meta['durationSeconds'] * meta['originalWidth'] * meta['originalHeight'] / 115200
+    return min(120, max(16, math.ceil(seconds)))
 
 
 def scene_cut(a, b):

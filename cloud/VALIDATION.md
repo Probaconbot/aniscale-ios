@@ -23,3 +23,15 @@ performance. Actual Android/iPhone installation testing remains necessary.
 The remote integration test is opt-in via `ANISCALE_HF_TOKEN` and
 `ANISCALE_SMOKE_VIDEO` runtime environment variables; it is skipped in public CI.
 Never put a token into source, a dart-define, or a release asset.
+
+## 1.15.2 connection hotfix
+
+- Directly register the decorated GPU function so Gradio does not wrap an
+  undecorated parent with the default reservation. Convert the wall-time estimate
+  to the pinned Spaces runtime's shared-GPU reservation units.
+- Accept native 1080p input; retain the 10-second, 360-frame and 100 MB limits.
+- Use the full Gradio queue protocol to preserve allocation/quota error details.
+- Real GPU test through the app's Dart service: two synthetic 1920×1080 frames
+  produced 3840×2160 HEVC at 30000/1001 FPS with matching AAC packet SHA-256.
+  This is a short functional test, not a sustained throughput or quality benchmark.
+- Eight Python pipeline tests and six Dart transport tests cover the updated path.

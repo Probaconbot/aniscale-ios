@@ -4,13 +4,15 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
+import ast
 
 import numpy as np
 import torch
 from torch.nn import functional as F
 
 from animesr import AnimeSR
-from pipeline import inspect_video, process_video, scene_cut, managed_results
+from pipeline import inspect_video, process_video, scene_cut, managed_results, gpu_duration
 
 
 class RecordingModel:
@@ -23,6 +25,20 @@ class RecordingModel:
 
 
 class TemporalTests(unittest.TestCase):
+    def test_small_job_requests_small_allocation(self):
+        with patch('pipeline.inspect_video', return_value=dict(durationSeconds=.2, originalWidth=64, originalHeight=48)):
+            self.assertEqual(gpu_duration('input', 2, 'natural', 'h264'), 16)
+
+    def test_gradio_registers_the_explicitly_decorated_function(self):
+        tree = ast.parse(Path(__file__).with_name('app.py').read_text())
+        upscale = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'upscale')
+        self.assertEqual(len(upscale.decorator_list), 1)
+        decorator = upscale.decorator_list[0]
+        self.assertEqual(decorator.func.attr, 'GPU')
+        self.assertTrue(any(k.arg == 'duration' and isinstance(k.value, ast.Name) and k.value.id == 'allocation_duration' for k in decorator.keywords))
+        click = next(n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name) and n.func.value.id == 'start' and n.func.attr == 'click')
+        self.assertEqual(click.args[0].id, 'upscale')
+
     def test_pixel_unshuffle_is_channel_major(self):
         value = torch.arange(3 * 8 * 8).view(1, 3, 8, 8).float()
         official = value.view(1, 3, 2, 4, 2, 4).permute(0, 1, 3, 5, 2, 4).reshape(1, 48, 2, 2)

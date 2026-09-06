@@ -26,7 +26,7 @@ class CloudProgress {
   final String stage;
 }
 
-/// Streaming Gradio 5.49 call/SSE protocol. There is deliberately no native
+/// Streaming Gradio 5.49 queue/SSE protocol. There is deliberately no native
 /// inference fallback: selecting cloud must not start work on the phone GPU/CPU.
 class CloudVideoService {
   CloudVideoService({required this.endpoint, required String token})
@@ -187,9 +187,10 @@ class CloudVideoService {
         throw const CloudVideoException('The upload did not return a video.');
       }
       _checkCancelled();
-      final job = await _post('/gradio_api/call/upscale', {
-        // Gradio's /call SSE reader indexes messages by event_id. Let the
-        // server use that event ID as the session too (do not supply our own).
+      final job = await _post('/gradio_api/queue/join', {
+        'fn_index': _function,
+        'session_hash': _session,
+        'simple_format': true, // Full generator values, not JSON diffs.
         'data': [
           {
             'path': uploaded.first,
@@ -211,13 +212,12 @@ class CloudVideoService {
       onProgress(const CloudProgress(.15, 'Waiting for a Hugging Face GPU…'));
       final request = await _request(
         'GET',
-        endpoint.resolve('/gradio_api/call/upscale/$_event'),
+        endpoint.resolve('/gradio_api/queue/data?session_hash=$_session'),
       );
       final response = await request.close();
       if (response.statusCode != 200) await _json(response);
       Map? resultFile;
       Map? metadata;
-      var event = '';
       var data = '';
       var complete = false;
       await for (final line
@@ -226,16 +226,28 @@ class CloudVideoService {
               .transform(utf8.decoder)
               .transform(const LineSplitter())) {
         _checkCancelled();
-        if (line.startsWith('event:')) event = line.substring(6).trim();
         if (line.startsWith('data:')) data += line.substring(5).trim();
         if (line.isNotEmpty) continue;
-        if (event == 'error') {
-          throw const CloudVideoException(
-            'Hugging Face could not run the GPU job. Check the Space logs or your daily GPU quota; nothing ran on your phone.',
+        if (data.isEmpty) continue;
+        final message = jsonDecode(data) as Map;
+        data = '';
+        final event = message['msg'];
+        final output = message['output'] is Map
+            ? message['output'] as Map
+            : const {};
+        if (event == 'unexpected_error' || message['success'] == false) {
+          final text =
+              (output['error'] ??
+                      message['message'] ??
+                      'Hugging Face could not run the GPU job. Check your GPU quota.')
+                  .toString()
+                  .replaceAll(_token, '[redacted]');
+          throw CloudVideoException(
+            text.length > 600 ? text.substring(0, 600) : text,
           );
         }
-        if ((event == 'generating' || event == 'complete') && data.isNotEmpty) {
-          final values = jsonDecode(data);
+        if (event == 'process_generating' || event == 'process_completed') {
+          final values = output['data'];
           if (values is List && values.length >= 2 && values[1] is Map) {
             metadata = values[1] as Map;
             if (metadata['error'] is String) {
@@ -261,13 +273,11 @@ class CloudVideoService {
             );
             if (values[0] is Map) resultFile = values[0] as Map;
           }
-          if (event == 'complete') {
+          if (event == 'process_completed') {
             complete = true;
             break;
           }
         }
-        event = '';
-        data = '';
       }
       if (!complete || resultFile == null || metadata == null) {
         throw const CloudVideoException(
@@ -398,7 +408,7 @@ class CloudVideoService {
       request.headers.contentType = ContentType.json;
       request.write(
         jsonEncode({
-          'session_hash': _event,
+          'session_hash': _session,
           'fn_index': _function,
           'event_id': _event,
         }),

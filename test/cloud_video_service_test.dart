@@ -52,15 +52,17 @@ void main() {
         final body = await utf8.decoder.bind(request).join();
         expect(body, contains('filename="input.mp4"'));
         response.write(jsonEncode(['/tmp/input.mp4']));
-      } else if (request.uri.path == '/gradio_api/call/upscale') {
+      } else if (request.uri.path == '/gradio_api/queue/join') {
         final body = jsonDecode(await utf8.decoder.bind(request).join()) as Map;
-        expect(body.containsKey('session_hash'), isFalse);
+        expect(body['session_hash'], isNotEmpty);
+        expect(body['fn_index'], 0);
+        expect(body['simple_format'], true);
         expect((body['data'] as List)[1], 2);
         response.write('{"event_id":"job123"}');
       } else if (request.uri.path == '/gradio_api/cancel') {
         cancelled = jsonDecode(await utf8.decoder.bind(request).join()) as Map;
         response.write('{"success":true}');
-      } else if (request.uri.path == '/gradio_api/call/upscale/job123') {
+      } else if (request.uri.path == '/gradio_api/queue/data') {
         response.headers.contentType = ContentType('text', 'event-stream');
         final meta = {
           'progress': 1,
@@ -85,9 +87,22 @@ void main() {
                 meta,
               ];
         response.write(
-          'event: heartbeat\ndata: null\n\nevent: generating\ndata: [null,{"progress":0.5,"stage":"GPU restoring"}]\n\n',
+          'data: {"msg":"heartbeat"}\n\ndata: {"msg":"process_generating","success":true,"output":{"data":[null,{"progress":0.5,"stage":"GPU restoring"}]}}\n\n',
         );
-        response.write('event: complete\ndata: ${jsonEncode(values)}\n\n');
+        final message = mode == 'allocation_error'
+            ? {
+                'msg': 'process_completed',
+                'success': false,
+                'output': {
+                  'error': 'GPU quota: 180 seconds requested, 154 remaining',
+                },
+              }
+            : {
+                'msg': 'process_completed',
+                'success': true,
+                'output': {'data': values},
+              };
+        response.write('data: ${jsonEncode(message)}\n\n');
       } else if (request.uri.path == '/gradio_api/file=result.mp4') {
         response.headers.contentType = ContentType('video', 'mp4');
         response.add(mode == 'bad_mp4' ? List.filled(20, 0) : mp4);
@@ -161,8 +176,16 @@ void main() {
     mode = 'gpu_error';
     await runFailure('Daily GPU quota exceeded');
     expect(cancelled?['event_id'], 'job123');
-    expect(cancelled?['session_hash'], 'job123');
+    expect(cancelled?['session_hash'], isNotEmpty);
   });
+
+  test(
+    'preserves the actual allocation error instead of a generic failure',
+    () async {
+      mode = 'allocation_error';
+      await runFailure('180 seconds requested, 154 remaining');
+    },
+  );
 
   test('never forwards private token to another download host', () async {
     mode = 'unsafe_url';

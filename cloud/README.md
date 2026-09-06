@@ -18,16 +18,16 @@ Uses the official pretrained AnimeSR_v2 recurrent model, not a renamed resize
 filter. No training, generated-detail model, or local-phone inference fallback.
 
 This first free-GPU connection accepts SDR, unrotated anime clips up to 10 seconds,
-360 frames, 1280×720 (portrait equivalent), and 100 MB. Longer/HDR inputs fail
+360 frames, 1920×1080 (portrait equivalent), and 100 MB. Longer/HDR inputs fail
 explicitly, never silently truncate or downscale the neural input. Output fits
-3840×2160, preserving aspect ratio. 2× uses native 4× inference then downsamples.
+3840×2160, preserving aspect ratio. 2× uses native 4× inferehe API `upscale` accepts a Gradio FileData input, scale (2 or 4), dnce then downsamples.
 Free GPU allocation and daily quotas are enforced by Hugging Face.
 
-The API `upscale` accepts a Gradio FileData input, scale (2 or 4), detail
+Tetail
 (`natural`, `detailed`, `sharp`), and codec (`hevc`, `h264`). It yields
 `[outputFileOrNull, statusObject]`; status includes progress, stage and final
 dimensions/duration. Errors are returned in `status.error`. Inference is only
-inside a 120-second ZeroGPU allocation. Cancellation stops the Gradio iterator;
+inside a dynamically sized 16–120-second ZeroGPU allocation. Cancellation stops the Gradio iterator;
 an already-running GPU operation may finish before cancellation is observed.
 
 The app sends a Hugging Face read token only to the fixed private Space origin.
