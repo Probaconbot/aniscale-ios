@@ -52,10 +52,10 @@ def upscale(video, scale, detail, codec):
         yield None, {'error': 'Video decoding or audio remux failed. Try an SDR MP4 with AAC audio.', 'stage': 'Failed', 'progress': 0}
 
 
-@spaces.GPU(duration=40, size='large')
+@spaces.GPU(duration=20, size='large')
 def train_free(domain, resume):
-    # spaces==0.51.3 applies the current 3x shared-hardware factor, so 40
-    # allocation units provides a 120-second wall-time session.
+    # Keep each resumable run short enough to fit the free daily GPU allowance.
+    # spaces==0.51.3 currently maps 20 allocation units to about 60 seconds.
     return run_training_session(domain, resume)
 
 
