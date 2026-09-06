@@ -129,8 +129,8 @@ def prepare_clip(
             str(source),
             "-vf",
             f"fps={fps},{hr_scale}",
-            "-vsync",
-            "0",
+            "-fps_mode",
+            "passthrough",
             str(hr_directory / "%06d.png"),
         ]
     )
@@ -187,8 +187,8 @@ def prepare_clip(
             "-y",
             "-i",
             str(previous),
-            "-vsync",
-            "0",
+            "-fps_mode",
+            "passthrough",
             str(lq_directory / "%06d.png"),
         ]
     )

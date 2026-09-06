@@ -20,10 +20,12 @@ filter. No training, generated-detail model, or local-phone inference fallback.
 This first free-GPU connection accepts SDR, unrotated anime clips up to 10 seconds,
 360 frames, 1920×1080 (portrait equivalent), and 100 MB. Longer/HDR inputs fail
 explicitly, never silently truncate or downscale the neural input. Output fits
-3840×2160, preserving aspect ratio. 2× uses native 4× inferehe API `upscale` accepts a Gradio FileData input, scale (2 or 4), dnce then downsamples.
+3840×2160, preserving aspect ratio. 2× uses native 4× inference then downsamples.
+This checkpoint targets animation, not realistic skin or live-action sports.
+Do not use its output as ground truth for live-action training.
 Free GPU allocation and daily quotas are enforced by Hugging Face.
 
-Tetail
+The API `upscale` accepts a Gradio FileData input, scale (2 or 4), detail
 (`natural`, `detailed`, `sharp`), and codec (`hevc`, `h264`). It yields
 `[outputFileOrNull, statusObject]`; status includes progress, stage and final
 dimensions/duration. Errors are returned in `status.error`. Inference is only

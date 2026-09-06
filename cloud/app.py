@@ -9,6 +9,7 @@ import gradio as gr
 import torch
 
 from animesr import load_model
+from free_training import run_training_session
 from pipeline import process_video, gpu_duration, remove_expired_outputs
 from spaces.zero.client import get_duration_seconds
 
@@ -51,6 +52,13 @@ def upscale(video, scale, detail, codec):
         yield None, {'error': 'Video decoding or audio remux failed. Try an SDR MP4 with AAC audio.', 'stage': 'Failed', 'progress': 0}
 
 
+@spaces.GPU(duration=40, size='large')
+def train_free(domain, resume):
+    # spaces==0.51.3 applies the current 3x shared-hardware factor, so 40
+    # allocation units provides a 120-second wall-time session.
+    return run_training_session(domain, resume)
+
+
 with gr.Blocks(title='AniScale private GPU', delete_cache=(600, 3600)) as demo:
     gr.Markdown('# AniUltraAnime · private GPU\nOfficial AnimeSR_v2. Upload only when ready. Free GPU: clips ≤10s, ≤1080p, ≤100 MB. Files expire within about one hour. Keep this Space private.')
     video = gr.File(label='Anime video', file_types=['video'], type='filepath')
@@ -67,5 +75,13 @@ with gr.Blocks(title='AniScale private GPU', delete_cache=(600, 3600)) as demo:
     # ZeroGPU prefetching can finish before Gradio caches the final file.
     job = start.click(upscale, [video, scale, detail, codec], [result, status], api_name='upscale', concurrency_limit=1)
     stop.click(fn=None, cancels=[job], api_name=False)
+    with gr.Accordion('Owner: free resumable training', open=False):
+        gr.Markdown('Private experimental checkpoints only. Each run uses the free daily GPU quota and stops before the allocation ends.')
+        train_domain = gr.Radio(['anime', 'live-action'], value='live-action', label='Checkpoint domain')
+        train_resume = gr.File(label='Previous latest.pth (leave empty for the first session)', type='filepath')
+        train_start = gr.Button('Run one free training session')
+        train_checkpoint = gr.File(label='Download and keep for the next session')
+        train_status = gr.JSON(label='Training status')
+        train_start.click(train_free, [train_domain, train_resume], [train_checkpoint, train_status], api_name='train_free', concurrency_limit=1)
 
 demo.queue(max_size=4).launch(show_error=False, max_file_size='100mb')

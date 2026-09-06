@@ -42,6 +42,9 @@ def canonical_license(value: str) -> str | None:
     match = re.search(r"cc[- ]?by(?: attribution)?[- ]?(2\.0|3\.0|4\.0)", compact)
     if match:
         return f"CC BY {match.group(1)}"
+    match = re.search(r"cc[- ]?by[- ]?sa(?: attribution share-alike)?[- ]?(3\.0|4\.0)", compact)
+    if match:
+        return f"CC BY-SA {match.group(1)}"
     return None
 
 

@@ -5,7 +5,9 @@
     "Public domain",
     "CC BY 2.0",
     "CC BY 3.0",
-    "CC BY 4.0"
+    "CC BY 4.0",
+    "CC BY-SA 3.0",
+    "CC BY-SA 4.0"
   ],
   "policy": {
     "require_attribution_manifest": true,
@@ -16,6 +18,18 @@
     "exclude_youtube_scraping": true
   },
   "curated_videos": [
+    {
+      "id": "morevna-episode-3-1080p",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/a/a7/Morevna_Episode_3.0.2_%28English%29.webm",
+      "media_type": "video",
+      "expected_bytes": 138495285,
+      "license": "CC BY-SA 4.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Morevna_Episode_3.0.2_(English).webm",
+      "creator": "Morevna Project",
+      "attribution": "Morevna Episode 3.0.2 © Morevna Project, CC BY-SA 4.0",
+      "content": ["2D anime", "line art", "faces", "hair", "cloth", "camera movement"]
+    },
     {
       "id": "blender-sintel-1080p",
       "url": "https://download.blender.org/durian/movies/Sintel.2010.1080p.mkv",

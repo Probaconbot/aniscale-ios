@@ -408,12 +408,12 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Private AniUltraAnime GPU',
+                        'Private AniUltraAnime GPU • Anime only',
                         style: TextStyle(fontWeight: FontWeight.w700),
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Lushus6pg/aniscale-video\nFree GPU test: up to 10 seconds, 1080p, 100 MB. Daily GPU quota applies. Other engines remain on-device.',
+                        'AnimeSR is for animation, not realistic skin or live-action sports. Live-action footage may look flattened or waxy.\nLushus6pg/aniscale-video\nFree GPU test: up to 10 seconds, 1080p, 100 MB. Daily GPU quota applies. Other engines remain on-device.',
                         style: TextStyle(
                           color: AniColors.secondaryText,
                           fontSize: 12,

@@ -41,6 +41,8 @@ migrate_working_dir/
 /training/data/
 /training/runs/
 /training/reports/
+/training/.model-cache/
+/cloud/training_results/
 
 # Symbolication related
 app.*.symbols
