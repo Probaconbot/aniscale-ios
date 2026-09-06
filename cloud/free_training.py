@@ -44,14 +44,15 @@ def run_training_session(domain: str, resume: str | None) -> tuple[str | None, d
             "--output", str(output),
             "--domain", domain,
             "--cache", str(ROOT / ".model-cache"),
-            "--session-seconds", "5",
-            "--max-steps", "1",
+            "--session-seconds", "60",
             "--patch-size", "128",
             "--batch-size", "1",
             "--workers", "0",
         ]
-        if resume:
-            resume_path = Path(resume)
+        persistent = ROOT / "training_results"
+        persistent_checkpoint = persistent / f"{domain}-latest.pth"
+        resume_path = Path(resume) if resume else persistent_checkpoint
+        if resume_path.is_file():
             if not resume_path.is_file() or resume_path.stat().st_size > 100 * 1024 * 1024:
                 return None, {"error": "Resume checkpoint is missing or exceeds 100 MB."}
             local_resume = workspace / "resume.pth"
@@ -62,7 +63,7 @@ def run_training_session(domain: str, resume: str | None) -> tuple[str | None, d
             cwd=ROOT,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=75,
             check=False,
         )
         if completed.returncode != 0:
@@ -72,7 +73,6 @@ def run_training_session(domain: str, resume: str | None) -> tuple[str | None, d
         report = output / "session.json"
         if not checkpoint.is_file() or not report.is_file():
             return None, {"error": "Training ended without a complete checkpoint."}
-        persistent = ROOT / "training_results"
         persistent.mkdir(exist_ok=True)
         destination = persistent / f"{domain}-latest.pth"
         shutil.copy2(checkpoint, destination)
