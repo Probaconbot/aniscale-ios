@@ -15,7 +15,7 @@ on:
         description: Private test version label
         required: false
         type: string
-        default: 1.15.3-training-test.1
+        default: 1.15.4-trained-anime-test.1
 
 permissions:
   contents: write
@@ -93,22 +93,32 @@ jobs:
           path: |
             ios/Runner/Models/AniUltraAnime_v2_recurrent.mlpackage
             android/app/src/main/assets/models/AniUltraAnime_v2_recurrent.onnx
-          key: aniultraanime-v2-mobile-v1-${{ hashFiles('tools/convert_animesr_mobile.py') }}
+          key: aniultraanime-v2-trained-i208-79a9754-${{ hashFiles('tools/convert_animesr_mobile.py') }}
 
-      - name: Convert official AnimeSR v2 for Android and iPhone
+      - name: Convert private trained AnimeSR v2 for Android and iPhone
         if: steps.anime-vsr-cache.outputs.cache-hit != 'true'
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "numpy<2" "torch==2.5.1" "coremltools==8.1" "onnx==1.17.0" "gdown==5.2.0"
+          python -m pip install "numpy<2" "torch==2.5.1" "coremltools==8.1" "onnx==1.17.0"
           mkdir -p "$RUNNER_TEMP/animesr-weights" build/aniultraanime ios/Runner/Models android/app/src/main/assets/models
-          # Fetch only the recommended v2 checkpoint. Downloading the whole
-          # upstream Drive folder also touches the retired v1 file, which is
-          # intermittently denied and used to abort otherwise valid builds.
-          ANIME_CHECKPOINT="$RUNNER_TEMP/animesr-weights/AnimeSR_v2.pth"
-          gdown 'https://drive.google.com/uc?id=1E_qsFqlIre-fMUSSLADQboBssNIWSqmm' \
-            -O "$ANIME_CHECKPOINT"
-          echo "d0f29c8966b53718828bd424bbdc306e7ff0cbf6350beadaf8b5b2500b108548  $ANIME_CHECKPOINT" | shasum -a 256 -c -
+          test -n "$GH_TOKEN"
+          ANIME_CHECKPOINT="$RUNNER_TEMP/animesr-weights/anime-latest.pth"
+          RELEASE_JSON="$RUNNER_TEMP/animesr-weights/release.json"
+          curl -L --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -o "$RELEASE_JSON" \
+            'https://api.github.com/repos/Probaconbot/aniscale-ios/releases?per_page=100'
+          ASSET_API=$(python -c 'import json,sys; releases=json.load(open(sys.argv[1])); release=next(item for item in releases if item["tag_name"] == "aniscale-anime-i208-weights-private" and item["draft"]); print(next(asset["url"] for asset in release["assets"] if asset["name"] == "aniscale-anime-i208.pth"))' "$RELEASE_JSON")
+          curl -L --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/octet-stream' \
+            -o "$ANIME_CHECKPOINT" \
+            "$ASSET_API"
+          echo "79a9754db6e86dc8213c7e5de20145a85c1ed275953403366a464b8c06e8e194  $ANIME_CHECKPOINT" | shasum -a 256 -c -
           python tools/convert_animesr_mobile.py \
             --checkpoint "$ANIME_CHECKPOINT" \
             --output build/aniultraanime
@@ -130,7 +140,7 @@ jobs:
           path: |
             ios/Runner/Models/AniUltraAnime_v2_recurrent.mlpackage
             android/app/src/main/assets/models/AniUltraAnime_v2_recurrent.onnx
-          key: aniultraanime-v2-mobile-v1-${{ hashFiles('tools/convert_animesr_mobile.py') }}
+          key: aniultraanime-v2-trained-i208-79a9754-${{ hashFiles('tools/convert_animesr_mobile.py') }}
 
       - name: Restore private AniRealism CDA-VSR models
         id: cda-vsr-cache
@@ -360,7 +370,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TEST_VERSION: ${{ inputs.version || '1.15.3-training-test.1' }}
+          TEST_VERSION: ${{ inputs.version || '1.15.4-trained-anime-test.1' }}
         run: |
           set -euo pipefail
           test -n "$TEST_VERSION"
@@ -394,6 +404,9 @@ jobs:
           - Fixes accidental default GPU allocation requests and scales reservation time to the actual shared hardware.
           - Shows the server's actual GPU quota/error message instead of discarding it behind a generic failure.
           - Adds private, resumable anime and live-action fine-tuning with edge, detail, and temporal losses.
+          - Replaces AniUltraAnime's official base checkpoint with the validated private anime fine-tune at iteration 208 on both Android and iOS.
+          - The trained checkpoint is checksum-pinned, domain-validated, and exported from a separate private draft model vault without bundling an access token.
+          - Keeps AniRealism on the audited CDA-VSR checkpoint; the incompatible experimental live-action fine-tune is not mislabeled or shipped.
           - Preserves the verified live-action GPU bootstrap checkpoint for automatic continuation after the free quota resets.
           - Keeps private datasets and trained checkpoints out of the APK and IPA.
           - Verified a real GPU round trip through the app transport, 29.97 FPS preservation and bit-identical copied audio on a synthetic test clip. This is not a full-size performance/quality benchmark or an actual iPhone device benchmark.
@@ -405,5 +418,5 @@ jobs:
             "$IOS_FILE" "$ANDROID_FILE" SHA256SUMS.txt \
             --draft \
             --target "${GITHUB_SHA}" \
-            --title "AniScale ${TEST_VERSION} — Private Training Test" \
+            --title "AniScale ${TEST_VERSION} — Private Trained Anime Mobile Test" \
             --notes-file "$RUNNER_TEMP/private-test-notes.md"

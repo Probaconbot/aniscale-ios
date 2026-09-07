@@ -10,6 +10,8 @@ from torch import nn
 from torch.nn import functional as F
 
 CHECKPOINT_SHA256 = 'd0f29c8966b53718828bd424bbdc306e7ff0cbf6350beadaf8b5b2500b108548'
+TRAINED_CHECKPOINT_SHA256 = '79a9754db6e86dc8213c7e5de20145a85c1ed275953403366a464b8c06e8e194'
+FINE_TUNE_FORMAT = 'animesr-v2-finetune-v1'
 
 
 class ResidualBlockNoBN(nn.Module):
@@ -69,6 +71,22 @@ class AnimeSR(nn.Module):
 
 def load_model(directory):
     import gdown
+    trained = Path(__file__).resolve().parent / 'training_results' / 'anime-latest.pth'
+    if trained.exists():
+        if hashlib.sha256(trained.read_bytes()).hexdigest() != TRAINED_CHECKPOINT_SHA256:
+            raise RuntimeError('AniScale anime checkpoint checksum mismatch.')
+        loaded = torch.load(trained, map_location='cpu', weights_only=True)
+        if loaded.get('format') != FINE_TUNE_FORMAT or loaded.get('domain') != 'anime':
+            raise RuntimeError('AniScale anime checkpoint metadata is invalid.')
+        if not isinstance(loaded.get('iteration'), int) or loaded['iteration'] < 208:
+            raise RuntimeError('AniScale anime checkpoint is older than the validated build.')
+        state_dict = loaded.get('params_ema')
+        if not isinstance(state_dict, dict):
+            raise RuntimeError('AniScale anime checkpoint is missing params_ema weights.')
+        model = AnimeSR()
+        model.load_state_dict(state_dict, strict=True)
+        return model.eval()
+
     path = Path(directory) / 'AnimeSR_v2.pth'
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
