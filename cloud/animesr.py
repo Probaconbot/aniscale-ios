@@ -10,7 +10,7 @@ from torch import nn
 from torch.nn import functional as F
 
 CHECKPOINT_SHA256 = 'd0f29c8966b53718828bd424bbdc306e7ff0cbf6350beadaf8b5b2500b108548'
-TRAINED_CHECKPOINT_SHA256 = '79a9754db6e86dc8213c7e5de20145a85c1ed275953403366a464b8c06e8e194'
+TRAINED_CHECKPOINT_SHA256 = 'f76cf6ec4b113d4f6182e3b5450fe37b77f7121f0532c4ea9e30e0d95a2ef7bc'
 FINE_TUNE_FORMAT = 'animesr-v2-finetune-v1'
 
 
@@ -69,17 +69,20 @@ class AnimeSR(nn.Module):
         return enhanced, self.lrelu(result[:, 48:])
 
 
-def load_model(directory):
+def load_model(directory, *, require_trained=False):
     import gdown
-    trained = Path(__file__).resolve().parent / 'training_results' / 'anime-latest.pth'
+    # Inference is pinned separately from mutable training/resume files.
+    trained = Path(__file__).resolve().parent / 'inference_models' / 'anime-i413.pth'
     if trained.exists():
         if hashlib.sha256(trained.read_bytes()).hexdigest() != TRAINED_CHECKPOINT_SHA256:
             raise RuntimeError('AniScale anime checkpoint checksum mismatch.')
         loaded = torch.load(trained, map_location='cpu', weights_only=True)
         if loaded.get('format') != FINE_TUNE_FORMAT or loaded.get('domain') != 'anime':
             raise RuntimeError('AniScale anime checkpoint metadata is invalid.')
-        if not isinstance(loaded.get('iteration'), int) or loaded['iteration'] < 208:
-            raise RuntimeError('AniScale anime checkpoint is older than the validated build.')
+        if loaded.get('iteration') != 413:
+            raise RuntimeError('AniScale anime checkpoint iteration does not match this build.')
+        if loaded.get('dataset_manifest_sha256') != '6ad27667e0f8f7c65a2bc66ab88485b1d22ebb6f43190f9051526aa7fca4720e':
+            raise RuntimeError('AniScale anime checkpoint dataset identity mismatch.')
         state_dict = loaded.get('params_ema')
         if not isinstance(state_dict, dict):
             raise RuntimeError('AniScale anime checkpoint is missing params_ema weights.')
@@ -87,6 +90,8 @@ def load_model(directory):
         model.load_state_dict(state_dict, strict=True)
         return model.eval()
 
+    if require_trained:
+        raise RuntimeError('The pinned AniScale anime inference checkpoint is missing.')
     path = Path(directory) / 'AnimeSR_v2.pth'
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():

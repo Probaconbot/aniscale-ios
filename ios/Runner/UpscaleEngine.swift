@@ -510,6 +510,11 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
         AVVideoCodecKey: outputCodec,
         AVVideoWidthKey: outputWidth,
         AVVideoHeightKey: outputHeight,
+        AVVideoColorPropertiesKey: [
+          AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+          AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+          AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2
+        ],
         AVVideoCompressionPropertiesKey: [
           AVVideoAverageBitRateKey: bitrate,
           AVVideoExpectedSourceFrameRateKey: frameRate
@@ -701,7 +706,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
             "CIColorControls",
             parameters: [
               kCIInputSaturationKey: 0.99,
-              kCIInputContrastKey: detailMode == "sharp" ? 1.075 : 1.045,
+              kCIInputContrastKey: 1.0,
               kCIInputBrightnessKey: 0.0
             ]
           )
@@ -727,7 +732,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
             "CIColorControls",
             parameters: [
               kCIInputSaturationKey: 1.0,
-              kCIInputContrastKey: detailMode == "sharp" ? 1.065 : 1.035,
+              kCIInputContrastKey: 1.0,
               kCIInputBrightnessKey: 0.0
             ]
           )
@@ -753,7 +758,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
           enhancedFrame,
           to: outputBuffer,
           bounds: CGRect(x: 0, y: 0, width: outputWidth, height: outputHeight),
-          colorSpace: CGColorSpaceCreateDeviceRGB()
+          colorSpace: CGColorSpace(name: CGColorSpace.itur_709)!
         )
       }
       guard adaptor.append(outputBuffer, withPresentationTime: timestamp) else {

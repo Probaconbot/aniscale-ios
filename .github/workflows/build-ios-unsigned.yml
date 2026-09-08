@@ -15,7 +15,7 @@ on:
         description: Private test version label
         required: false
         type: string
-        default: 1.15.4-trained-anime-test.1
+        default: 1.15.5-trained-anime-test.1
 
 permissions:
   contents: write
@@ -93,32 +93,25 @@ jobs:
           path: |
             ios/Runner/Models/AniUltraAnime_v2_recurrent.mlpackage
             android/app/src/main/assets/models/AniUltraAnime_v2_recurrent.onnx
-          key: aniultraanime-v2-trained-i208-79a9754-${{ hashFiles('tools/convert_animesr_mobile.py') }}
+          key: aniultraanime-v2-trained-i413-f76cf6e-${{ hashFiles('tools/convert_animesr_mobile.py') }}
 
       - name: Convert private trained AnimeSR v2 for Android and iPhone
         if: steps.anime-vsr-cache.outputs.cache-hit != 'true'
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          HF_SPACE_TOKEN: ${{ secrets.HF_SPACE_TOKEN }}
         run: |
           python -m pip install --upgrade pip
           python -m pip install "numpy<2" "torch==2.5.1" "coremltools==8.1" "onnx==1.17.0"
           mkdir -p "$RUNNER_TEMP/animesr-weights" build/aniultraanime ios/Runner/Models android/app/src/main/assets/models
-          test -n "$GH_TOKEN"
+          test -n "$HF_SPACE_TOKEN"
           ANIME_CHECKPOINT="$RUNNER_TEMP/animesr-weights/anime-latest.pth"
-          RELEASE_JSON="$RUNNER_TEMP/animesr-weights/release.json"
           curl -L --fail --silent --show-error \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H 'Accept: application/vnd.github+json' \
-            -o "$RELEASE_JSON" \
-            'https://api.github.com/repos/Probaconbot/aniscale-ios/releases?per_page=100'
-          ASSET_API=$(python -c 'import json,sys; releases=json.load(open(sys.argv[1])); release=next(item for item in releases if item["tag_name"] == "aniscale-anime-i208-weights-private" and item["draft"]); print(next(asset["url"] for asset in release["assets"] if asset["name"] == "aniscale-anime-i208.pth"))' "$RELEASE_JSON")
-          curl -L --fail --silent --show-error \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H 'Accept: application/octet-stream' \
+            -H "Authorization: Bearer $HF_SPACE_TOKEN" \
             -o "$ANIME_CHECKPOINT" \
-            "$ASSET_API"
-          echo "79a9754db6e86dc8213c7e5de20145a85c1ed275953403366a464b8c06e8e194  $ANIME_CHECKPOINT" | shasum -a 256 -c -
+            'https://huggingface.co/spaces/Lushus6pg/aniscale-video/resolve/main/inference_models/anime-i413.pth?download=true'
+          echo "f76cf6ec4b113d4f6182e3b5450fe37b77f7121f0532c4ea9e30e0d95a2ef7bc  $ANIME_CHECKPOINT" | shasum -a 256 -c -
+          python -m unittest tools.test_animesr_mobile
           python tools/convert_animesr_mobile.py \
             --checkpoint "$ANIME_CHECKPOINT" \
             --output build/aniultraanime
@@ -140,7 +133,7 @@ jobs:
           path: |
             ios/Runner/Models/AniUltraAnime_v2_recurrent.mlpackage
             android/app/src/main/assets/models/AniUltraAnime_v2_recurrent.onnx
-          key: aniultraanime-v2-trained-i208-79a9754-${{ hashFiles('tools/convert_animesr_mobile.py') }}
+          key: aniultraanime-v2-trained-i413-f76cf6e-${{ hashFiles('tools/convert_animesr_mobile.py') }}
 
       - name: Restore private AniRealism CDA-VSR models
         id: cda-vsr-cache
@@ -370,7 +363,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TEST_VERSION: ${{ inputs.version || '1.15.4-trained-anime-test.1' }}
+          TEST_VERSION: ${{ inputs.version || '1.15.5-trained-anime-test.1' }}
         run: |
           set -euo pipefail
           test -n "$TEST_VERSION"
@@ -404,11 +397,16 @@ jobs:
           - Fixes accidental default GPU allocation requests and scales reservation time to the actual shared hardware.
           - Shows the server's actual GPU quota/error message instead of discarding it behind a generic failure.
           - Adds private, resumable anime and live-action fine-tuning with edge, detail, and temporal losses.
-          - Replaces AniUltraAnime's official base checkpoint with the validated private anime fine-tune at iteration 208 on both Android and iOS.
-          - The trained checkpoint is checksum-pinned, domain-validated, and exported from a separate private draft model vault without bundling an access token.
+          - Updates AniUltraAnime from iteration 208 to experimental iteration 413 on Android, iOS, and private Hugging Face inference.
+          - Corrects RGB feedback channel ordering in the mobile export; tests compare three recurrent frames against the training network.
+          - Removes forced iOS contrast boosts and explicitly renders/tags SDR output as Rec.709.
+          - Preserves explicit cloud colour matrix, transfer, primaries, and range through RGB inference; colour and brightness round-trip tests cover HD/full-range and SD sources.
+          - The trained checkpoint is checksum-pinned, domain-validated, and exported from the private Space without bundling an access token.
+          - Separates pinned inference weights from mutable training checkpoints so later training cannot silently alter the deployed model.
           - Keeps AniRealism on the audited CDA-VSR checkpoint; the incompatible experimental live-action fine-tune is not mislabeled or shipped.
           - Preserves the verified live-action GPU bootstrap checkpoint for automatic continuation after the free quota resets.
-          - Keeps private datasets and trained checkpoints out of the APK and IPA.
+          - Keeps private datasets and raw training checkpoints out of the APK and IPA; converted anime weights are bundled for local inference.
+          - Checkpoint integrity and numerical parity pass. Held-out perceptual quality, sustained device speed, and thermal improvements are not yet established.
           - Verified a real GPU round trip through the app transport, 29.97 FPS preservation and bit-identical copied audio on a synthetic test clip. This is not a full-size performance/quality benchmark or an actual iPhone device benchmark.
           - Includes unsigned iOS IPA and Android APK.
 

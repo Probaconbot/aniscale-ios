@@ -96,7 +96,8 @@ class AnimeSRCell(nn.Module):
     def pixel_unshuffle_x4(value: torch.Tensor) -> torch.Tensor:
         """Core ML iOS 15-compatible equivalent of pixel_unshuffle(value, 4)."""
         return torch.cat(
-            [value[:, :, row::4, column::4] for row in range(4) for column in range(4)],
+            [value[:, channel:channel + 1, row::4, column::4]
+             for channel in range(3) for row in range(4) for column in range(4)],
             dim=1,
         )
 

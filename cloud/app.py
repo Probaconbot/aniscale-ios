@@ -18,7 +18,7 @@ cache = Path(tempfile.gettempdir()) / 'aniscale-models'
 outputs = Path(tempfile.gettempdir()) / 'aniscale-results'
 outputs.mkdir(exist_ok=True)
 # ZeroGPU emulates CUDA initialization outside the leased GPU function.
-model = load_model(cache).half().to('cuda')
+model = load_model(cache, require_trained=True).half().to('cuda')
 
 
 def sweep_outputs():
@@ -60,7 +60,7 @@ def train_free(domain, resume):
 
 
 with gr.Blocks(title='AniScale private GPU', delete_cache=(600, 3600)) as demo:
-    gr.Markdown('# AniUltraAnime · private GPU\nOfficial AnimeSR_v2. Upload only when ready. Free GPU: clips ≤10s, ≤1080p, ≤100 MB. Files expire within about one hour. Keep this Space private.')
+    gr.Markdown('# AniUltraAnime · private GPU\nAniScale anime fine-tune, iteration 413 (experimental). Upload only when ready. Free GPU: clips ≤10s, ≤1080p, ≤100 MB. Files expire within about one hour. Keep this Space private.')
     video = gr.File(label='Anime video', file_types=['video'], type='filepath')
     scale = gr.Radio([2, 4], value=2, label='Scale')
     detail = gr.Radio(['natural', 'detailed', 'sharp'], value='natural', label='Detail')

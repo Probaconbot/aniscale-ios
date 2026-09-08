@@ -7,6 +7,7 @@ import tempfile
 import time
 
 import av
+from av.video.reformatter import VideoReformatter
 import numpy as np
 import torch
 from torch.nn import functional as F
@@ -54,6 +55,40 @@ def scene_cut(a, b):
     return float(np.abs(a[::8, ::8].astype(np.float32) - b[::8, ::8]).mean()) > 45
 
 
+def video_color_spec(stream):
+    """Keep SDR matrix/primaries/transfer explicit across RGB inference."""
+    context = stream.codec_context
+    matrix = int(context.colorspace)
+    if matrix not in (1, 4, 5, 6, 7, 9):
+        matrix = 1 if stream.width >= 1280 or stream.height > 576 else 6
+    primaries = int(context.color_primaries)
+    transfer = int(context.color_trc)
+    return dict(matrix=matrix,
+                primaries=primaries if primaries not in (0, 2) else (1 if matrix == 1 else 6),
+                transfer=transfer if transfer not in (0, 2) else 1,
+                range=2 if int(context.color_range) == 2 else 1)
+
+
+def decode_rgb(frame, spec):
+    # swscale represents the BT.601 matrix by 5 (including SMPTE170M).
+    matrix = 5 if spec['matrix'] == 6 else spec['matrix']
+    return VideoReformatter().reformat(
+        frame, format='rgb24', src_colorspace=matrix,
+        src_color_range=spec['range'], dst_color_range=2,
+    ).to_ndarray()
+
+
+def encode_yuv(rgb, spec):
+    matrix = 5 if spec['matrix'] == 6 else spec['matrix']
+    frame = VideoReformatter().reformat(
+        av.VideoFrame.from_ndarray(rgb, format='rgb24'), format='yuv420p',
+        dst_colorspace=matrix, src_color_range=2, dst_color_range=1,
+    )
+    frame.colorspace = spec['matrix']
+    frame.color_range = 1
+    return frame
+
+
 def process_video(path, scale, detail, codec, model, output_root, device='cuda'):
     if detail not in ('natural', 'detailed', 'sharp') or codec not in ('hevc', 'h264'):
         raise ValueError('Unsupported detail or codec option.')
@@ -66,12 +101,17 @@ def process_video(path, scale, detail, codec, model, output_root, device='cuda')
         yield None, dict(progress=.03, stage='GPU allocated; decoding video', **meta)
         with av.open(path) as source, av.open(str(encoded), 'w') as target:
             stream = source.streams.video[0]
+            color = video_color_spec(stream)
             rate = stream.average_rate or Fraction(30, 1)
             output = target.add_stream('libx265' if codec == 'hevc' else 'libx264', rate=rate)
             output.width, output.height = meta['outputWidth'], meta['outputHeight']
             output.pix_fmt = 'yuv420p'
             output.time_base = Fraction(1, 90000)
             output.codec_context.thread_count = 2
+            output.codec_context.colorspace = color['matrix']
+            output.codec_context.color_primaries = color['primaries']
+            output.codec_context.color_trc = color['transfer']
+            output.codec_context.color_range = 1
             output.options = {'crf': '17', 'preset': 'fast'}
             if codec == 'hevc':
                 output.options['x265-params'] = 'pools=2:frame-threads=1:log-level=error'
@@ -80,10 +120,10 @@ def process_video(path, scale, detail, codec, model, output_root, device='cuda')
             current_frame = next(frames, None)
             if current_frame is None:
                 raise ValueError('No decodable video frames.')
-            current = current_frame.to_ndarray(format='rgb24')
+            current = decode_rgb(current_frame, color)
             previous = current
             following_frame = next(frames, None)
-            following = following_frame.to_ndarray(format='rgb24') if following_frame else current
+            following = decode_rgb(following_frame, color) if following_frame else current
             w, h = meta['originalWidth'], meta['originalHeight']
             ph, pw = (h + 3) // 4 * 4, (w + 3) // 4 * 4
             dtype = torch.float16 if device == 'cuda' else torch.float32
@@ -115,7 +155,7 @@ def process_video(path, scale, detail, codec, model, output_root, device='cuda')
                         residual = (image - low).clamp(-.03, .03)
                         image = image + residual * (.2 if detail == 'detailed' else .4)
                     rgb = image.clamp(0, 1).mul(255).round().byte()[0].permute(1, 2, 0).cpu().numpy()
-                frame = av.VideoFrame.from_ndarray(rgb, format='rgb24')
+                frame = encode_yuv(rgb, color)
                 timestamp = float(current_frame.pts * current_frame.time_base) - first_time if current_frame.pts is not None else count / float(rate)
                 frame.pts = round(timestamp * 90000)
                 if frame.pts <= last_pts:
@@ -132,7 +172,7 @@ def process_video(path, scale, detail, codec, model, output_root, device='cuda')
                 previous, current = current, following
                 current_frame = following_frame
                 following_frame = next(frames, None)
-                following = following_frame.to_ndarray(format='rgb24') if following_frame else current
+                following = decode_rgb(following_frame, color) if following_frame else current
             for packet in output.encode():
                 target.mux(packet)
         yield None, dict(progress=.94, stage='Preserving original audio', **meta)

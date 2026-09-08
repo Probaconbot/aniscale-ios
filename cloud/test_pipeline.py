@@ -8,11 +8,12 @@ from unittest.mock import patch
 import ast
 
 import numpy as np
+import av
 import torch
 from torch.nn import functional as F
 
 from animesr import AnimeSR
-from pipeline import inspect_video, process_video, scene_cut, managed_results, gpu_duration
+from pipeline import inspect_video, process_video, scene_cut, managed_results, gpu_duration, decode_rgb, video_color_spec
 
 
 class RecordingModel:
@@ -96,6 +97,36 @@ class VideoTests(unittest.TestCase):
         next(generator)
         generator.close()
         self.assertFalse(list(self.root.glob('aniscale-*')))
+
+    def test_colour_tags_and_brightness_round_trip(self):
+        # Two input matrices, including full-range HD, must survive RGB inference.
+        for matrix, primaries, input_range in [('bt709', 'bt709', 'pc'), ('smpte170m', 'smpte170m', 'tv')]:
+            with self.subTest(matrix=matrix, input_range=input_range):
+                original = self.root / (matrix + '.mp4')
+                subprocess.run([
+                    'ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i',
+                    'color=c=0x8e6352:size=64x48:rate=24', '-t', '0.125',
+                    '-vf', f'scale=in_range=tv:out_range={input_range}:out_color_matrix={matrix}',
+                    '-c:v', 'libx264', '-crf', '1', '-colorspace', matrix,
+                    '-color_primaries', primaries, '-color_trc', 'bt709',
+                    '-color_range', input_range, str(original),
+                ], check=True)
+                result = None
+                for result_path, _ in process_video(str(original), 2, 'natural', 'h264', RecordingModel(), self.root, device='cpu'):
+                    if result_path:
+                        result = result_path
+                video = next(s for s in self.probe(result) if s['codec_type'] == 'video')
+                self.assertEqual(video['color_space'], matrix)
+                self.assertEqual(video['color_primaries'], primaries)
+                self.assertEqual(video['color_transfer'], 'bt709')
+                self.assertEqual(video['color_range'], 'tv')
+                means = []
+                for path in (original, result):
+                    with av.open(str(path)) as source:
+                        stream = source.streams.video[0]
+                        rgb = decode_rgb(next(source.decode(stream)), video_color_spec(stream))
+                        means.append(rgb.astype(float).mean(axis=(0, 1)))
+                self.assertLess(float(np.max(np.abs(means[0] - means[1]))), 3.0)
 
     def test_scale_validation(self):
         with self.assertRaisesRegex(ValueError, '2× or 4×'):
