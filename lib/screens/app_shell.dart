@@ -19,6 +19,8 @@ import '../services/cloud_video_service.dart';
 import '../services/history_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/liquid_glass_surface.dart';
+import '../widgets/motion_feedback.dart';
+import '../services/ui_sounds.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -46,6 +48,7 @@ class _AppShellState extends State<AppShell> {
     if (!mounted) return;
     setState(() {
       _settings = values[0] as AppSettings;
+      UiSounds.configure(_settings.interfaceSounds);
       _history
         ..clear()
         ..addAll(values[1] as List<Enhancement>);
@@ -53,6 +56,7 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _updateSettings(AppSettings settings) {
+    UiSounds.configure(settings.interfaceSounds);
     setState(() => _settings = settings);
     unawaited(settings.save());
   }
@@ -107,7 +111,10 @@ class _AppShellState extends State<AppShell> {
         body: AmbientBackground(
           child: SafeArea(
             bottom: false,
-            child: IndexedStack(index: _tab, children: pages),
+            child: TabReveal(
+              index: _tab,
+              child: IndexedStack(index: _tab, children: pages),
+            ),
           ),
         ),
         bottomNavigationBar: FloatingNav(
@@ -456,7 +463,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                         _VideoEngine.render => 'Render',
                         _VideoEngine.turbo => 'Turbo',
                         _VideoEngine.superUltra => 'Super',
-                        _VideoEngine.animeUltra => _cloud ? 'Anime VSR' : 'Live 731',
+                        _VideoEngine.animeUltra => 'Anime VSR',
                         _VideoEngine.realism => 'Realism',
                       },
                     )
@@ -480,7 +487,8 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                   _VideoEngine.render => 'AniScale Render — a heavier 23-block model for clean 3D surfaces, sharper geometry, and restrained noise.',
                   _VideoEngine.turbo => 'AniScale Turbo — a compact video model for faster processing and lower heat.',
                   _VideoEngine.superUltra => 'SuperUltra — offline SPAN restoration with native mobile acceleration and no temporary frame files.',
-                  _VideoEngine.animeUltra => _cloud ? 'AniUltraAnime — cloud anime checkpoint 413.' : 'Live Progress 731 — experimental live-action AnimeSR checkpoint, processed on this device. This is not CDA-VSR or the new x4 training experiment.',
+                  _VideoEngine.animeUltra =>
+                    _cloud ? 'AniUltraAnime — cloud anime model.' : 'AniUltraAnime — this private test contains the experimental live-action fine-tune of AnimeSR. Processing stays on this device.',
                   _VideoEngine.realism => 'AniRealism Test — CDA-VSR recurrent live-action restoration with persistent temporal states and decoded-frame priors.',
                 },
                 textAlign: TextAlign.center,
@@ -494,7 +502,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                 _engine == _VideoEngine.superUltra
                     ? 'SUPERULTRA SCALE'
                     : _engine == _VideoEngine.animeUltra
-                    ? (_cloud ? 'ANIME UPSCALE' : 'LIVE PROGRESS 731 UPSCALE')
+                    ? 'ANIME UPSCALE'
                     : _engine == _VideoEngine.realism
                     ? 'LIVE-ACTION UPSCALE'
                     : 'VIDEO UPSCALE',
@@ -581,7 +589,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                     _VideoEngine.render => 'AniScale Render — 3D',
                     _VideoEngine.turbo => 'AniScale Turbo — Fast',
                     _VideoEngine.superUltra => 'SuperUltra — Offline SPAN',
-                    _VideoEngine.animeUltra => _cloud ? 'AniUltraAnime — AnimeSR_v2' : 'Live Progress 731 — on-device test',
+                    _VideoEngine.animeUltra => 'AniUltraAnime — AnimeSR_v2',
                     _VideoEngine.realism => 'AniRealism Test — CDA-VSR',
                   }),
                   subtitle: Text(
@@ -2553,6 +2561,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _change(widget.settings.copyWith(reduceMotion: value)),
               ),
               const Divider(color: AniColors.border, height: 1),
+              SwitchListTile.adaptive(
+                title: const Text('Interface sounds'),
+                value: widget.settings.interfaceSounds,
+                activeTrackColor: AniColors.purple,
+                onChanged: (value) =>
+                    _change(widget.settings.copyWith(interfaceSounds: value)),
+              ),
+              const Divider(color: AniColors.border, height: 1),
               ListTile(
                 leading: const Icon(
                   Icons.delete_outline_rounded,
@@ -2613,8 +2629,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   context: context,
                   applicationName: 'AniScale',
                   applicationVersion: _version,
-                  applicationLegalese:
-                      'Free, private image and video enhancement.',
+                  applicationLegalese: 'Private image and video enhancement. UI sound effects generated with ElevenLabs (elevenlabs.io). Private, non-commercial evaluation build.',
                 ),
               ),
               const Divider(color: AniColors.border, height: 1),
@@ -2654,7 +2669,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           SizedBox(height: 8),
                           Text(
-                            'Live Progress 731 — this private build uses experimental live-action AnimeSR weights in the local VSR slot. Cloud anime remains iteration 413.',
+                            'AniUltraAnime — this private build uses experimental live-action AnimeSR weights in the local VSR slot. Cloud anime uses a separate checkpoint.',
                           ),
                         ],
                       ),
@@ -2764,7 +2779,7 @@ class LiquidGlassIconButton extends StatelessWidget {
         message: tooltip ?? '',
         child: Material(
           type: MaterialType.transparency,
-          child: InkWell(
+          child: MotionTap(
             borderRadius: BorderRadius.circular(15),
             onTap: onPressed,
             child: SizedBox(
@@ -2843,7 +2858,7 @@ class CommandDeck extends StatelessWidget {
       return Material(
         color: active ? Colors.white : const Color(0xFF111215),
         borderRadius: BorderRadius.circular(24),
-        child: InkWell(
+        child: MotionTap(
           onTap: onTap,
           borderRadius: BorderRadius.circular(24),
           child: Container(
@@ -3064,7 +3079,12 @@ class GradientButton extends StatelessWidget {
         ],
       ),
       child: ElevatedButton.icon(
-        onPressed: onPressed,
+        onPressed: onPressed == null
+            ? null
+            : () {
+                UiSounds.play();
+                onPressed!();
+              },
         icon: icon == null ? const SizedBox.shrink() : Icon(icon, size: 19),
         label: Text(label),
         style: ElevatedButton.styleFrom(
@@ -3105,8 +3125,11 @@ class SegmentedGlass extends StatelessWidget {
           children: List.generate(labels.length, (index) {
             final active = index == selected;
             return Expanded(
-              child: GestureDetector(
-                onTap: () => onSelected(index),
+              child: MotionTap(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () {
+                  if (index != selected) onSelected(index);
+                },
                 child: AnimatedContainer(
                   duration: Duration(
                     milliseconds: MediaQuery.disableAnimationsOf(context)
@@ -3207,7 +3230,8 @@ class FloatingNav extends StatelessWidget {
             children: List.generate(items.length, (index) {
               final active = index == selectedIndex;
               return Expanded(
-                child: InkWell(
+                child: MotionTap(
+                  whoosh: true,
                   borderRadius: BorderRadius.circular(17),
                   onTap: () => onSelected(index),
                   child: AnimatedContainer(

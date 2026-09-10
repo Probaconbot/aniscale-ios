@@ -15,7 +15,7 @@ on:
         description: Private test version label
         required: false
         type: string
-        default: 1.15.6-live731-device-test.1
+        default: 1.15.7-glass-device-test.1
 
 permissions:
   contents: write
@@ -362,7 +362,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TEST_VERSION: ${{ inputs.version || '1.15.6-live731-device-test.1' }}
+          TEST_VERSION: ${{ inputs.version || '1.15.7-glass-device-test.1' }}
         run: |
           set -euo pipefail
           test -n "$TEST_VERSION"
@@ -372,20 +372,22 @@ jobs:
           cp build/app/outputs/flutter-apk/app-release.apk "$ANDROID_FILE"
           shasum -a 256 "$IOS_FILE" "$ANDROID_FILE" > SHA256SUMS.txt
           cat > "$RUNNER_TEMP/private-test-notes.md" <<'NOTES'
-          Private on-device progress checkpoint test. Version 1.15.6 (29).
+          Private on-device progress checkpoint test. Version 1.15.7 (30).
 
-          - Select On device, then Live 731. This local test slot contains the exact live-action i731 EMA checkpoint, converted to ONNX for Android and FP16 Core ML for iOS.
+          - Restores the original Anime VSR / AniUltraAnime UI labels, with no checkpoint number in the main controls. Model weights are unchanged from the preceding progress test: experimental live-action i731 in the local VSR slot. The engine description identifies the content-domain difference.
+          - Adds short press animations, gentle tab transitions, and ElevenLabs-generated tap/whoosh cues, trimmed for fast interaction feedback. Settings now includes Interface sounds. Reduce animations removes motion; silent-mode-friendly audio uses no Android audio focus and iOS ambient playback.
+          - UI sound effects generated with ElevenLabs (https://elevenlabs.io) using existing account credits. Private non-commercial evaluation only; commercial audio rights have not been verified.
           - Source checkpoint SHA-256: 7a685c4a1b18ad4a3dfc961cf10b8948311d22c280fbd4014dec47ee7480a89b.
           - This is the existing experimental AnimeSR-based live-action candidate shown in the comparison. It is not CDA-VSR and has not trained on the newly supplied x4 target dataset.
           - Cloud mode still uses anime i413 and does not run this checkpoint. Choose On device to test i731 offline.
           - On-device processing is the default. Supported local acceleration may be used; CPU-only execution is not forced.
           - Natural detail is selected by default. Mobile processing still bounds input resolution for memory, and encoding/FP16 can differ from research output.
-          - This test build temporarily uses the local Anime VSR slot for Live 731; previous mobile releases retain local anime i413.
+          - This test build temporarily uses the local Anime VSR slot for the experimental live-action checkpoint; previous mobile releases retain local anime i413.
           - Small held-out crop measurements improved for i731, but full-video quality, actual phone speed and thermal behavior have not been validated.
           - Android APK, unsigned iOS IPA and checksums are included. Older releases are retained.
           - CDA-VSR remains an unchanged separate private-evaluation engine with unresolved upstream licensing; do not redistribute this private build.
           NOTES
           gh release upload "v$TEST_VERSION" "$IOS_FILE" "$ANDROID_FILE" SHA256SUMS.txt --clobber
           gh release edit "v$TEST_VERSION" --draft --target "$GITHUB_SHA" \
-            --title "AniScale Live Progress 731 — Private Android and iOS Test" \
+            --title "AniScale 1.15.7 — Private Android and iOS Test" \
             --notes-file "$RUNNER_TEMP/private-test-notes.md"

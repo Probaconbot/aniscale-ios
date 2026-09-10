@@ -818,7 +818,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       "engine": engine == "superUltra"
         ? "SuperUltra — \(content.capitalized), \(detailMode.capitalized) (Core ML/Metal)"
         : (engine == "animeUltra"
-          ? "Live Progress 731 — experimental AnimeSR (Core ML/Metal)"
+          ? "AniUltraAnime — experimental fine-tune (Core ML/Metal)"
           : (engine == "realism"
             ? "AniRealism Test — CDA-VSR recurrent (ONNX Runtime/Core ML)"
             : (efficient

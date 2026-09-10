@@ -588,7 +588,7 @@ class MainActivity : FlutterActivity() {
             "engine" to if (engine == "superUltra") {
                 "SuperUltra — ${contentLabel(content)}, ${detailMode.replaceFirstChar { it.uppercase() }} (${backendLabel(engine)})"
             } else if (engine == "animeUltra") {
-                "Live Progress 731 — experimental AnimeSR (${backendLabel(engine)})"
+                "AniUltraAnime — experimental fine-tune (${backendLabel(engine)})"
             } else if (engine == "realism") {
                 "AniRealism Test — CDA-VSR recurrent (${backendLabel(engine)})"
             } else {
@@ -614,7 +614,7 @@ class MainActivity : FlutterActivity() {
     private fun engineLabel(engine: String): String = when (engine) {
         "render" -> "AniScale Render"
         "turbo" -> "AniScale Turbo"
-        "animeUltra" -> "Live Progress 731"
+        "animeUltra" -> "AniUltraAnime"
         "realism" -> "AniRealism Test"
         "superUltra" -> "SuperUltra"
         else -> "AniScale Fusion"

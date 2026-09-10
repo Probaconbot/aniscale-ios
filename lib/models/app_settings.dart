@@ -20,6 +20,7 @@ class AppSettings {
     this.preserveMetadata = true,
     this.saveHistory = true,
     this.reduceMotion = false,
+    this.interfaceSounds = true,
   });
 
   final OutputFormat outputFormat;
@@ -28,6 +29,7 @@ class AppSettings {
   final bool preserveMetadata;
   final bool saveHistory;
   final bool reduceMotion;
+  final bool interfaceSounds;
 
   String get tileSizeLabel => tileSize == 0 ? 'Automatic' : '$tileSize px';
   // Zero lets each native engine choose the fastest safe tile for the device.
@@ -40,6 +42,7 @@ class AppSettings {
     bool? preserveMetadata,
     bool? saveHistory,
     bool? reduceMotion,
+    bool? interfaceSounds,
   }) => AppSettings(
     outputFormat: outputFormat ?? this.outputFormat,
     tileSize: tileSize ?? this.tileSize,
@@ -47,6 +50,7 @@ class AppSettings {
     preserveMetadata: preserveMetadata ?? this.preserveMetadata,
     saveHistory: saveHistory ?? this.saveHistory,
     reduceMotion: reduceMotion ?? this.reduceMotion,
+    interfaceSounds: interfaceSounds ?? this.interfaceSounds,
   );
 
   static Future<AppSettings> load() async {
@@ -62,6 +66,7 @@ class AppSettings {
       preserveMetadata: preferences.getBool('preserveMetadata') ?? true,
       saveHistory: preferences.getBool('saveHistory') ?? true,
       reduceMotion: preferences.getBool('reduceMotion') ?? false,
+      interfaceSounds: preferences.getBool('interfaceSounds') ?? true,
     );
   }
 
@@ -74,6 +79,7 @@ class AppSettings {
       preferences.setBool('preserveMetadata', preserveMetadata),
       preferences.setBool('saveHistory', saveHistory),
       preferences.setBool('reduceMotion', reduceMotion),
+      preferences.setBool('interfaceSounds', interfaceSounds),
     ]);
   }
 }
