@@ -588,7 +588,7 @@ class MainActivity : FlutterActivity() {
             "engine" to if (engine == "superUltra") {
                 "SuperUltra — ${contentLabel(content)}, ${detailMode.replaceFirstChar { it.uppercase() }} (${backendLabel(engine)})"
             } else if (engine == "animeUltra") {
-                "AniUltraAnime — AnimeSR_v2 recurrent (${backendLabel(engine)})"
+                "Live Progress 731 — experimental AnimeSR (${backendLabel(engine)})"
             } else if (engine == "realism") {
                 "AniRealism Test — CDA-VSR recurrent (${backendLabel(engine)})"
             } else {
@@ -614,7 +614,7 @@ class MainActivity : FlutterActivity() {
     private fun engineLabel(engine: String): String = when (engine) {
         "render" -> "AniScale Render"
         "turbo" -> "AniScale Turbo"
-        "animeUltra" -> "AniUltraAnime"
+        "animeUltra" -> "Live Progress 731"
         "realism" -> "AniRealism Test"
         "superUltra" -> "SuperUltra"
         else -> "AniScale Fusion"
@@ -713,7 +713,7 @@ class MainActivity : FlutterActivity() {
                         val sharpening = when (detailMode) {
                             "sharp" -> 0.28f
                             "detailed" -> 0.17f
-                            else -> 0.06f
+                            else -> 0.0f
                         }
                         return bitmapFromPlanar(
                             enhanced,

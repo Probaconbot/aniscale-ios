@@ -123,7 +123,7 @@ class AnimeSRCell(nn.Module):
 FINE_TUNE_FORMAT = "animesr-v2-finetune-v1"
 
 
-def unwrap_state_dict(loaded: object) -> tuple[dict[str, torch.Tensor], dict[str, object]]:
+def unwrap_state_dict(loaded: object, domain: str = 'anime') -> tuple[dict[str, torch.Tensor], dict[str, object]]:
     """Accept official weights or a validated AniScale anime fine-tune wrapper."""
     if not isinstance(loaded, dict):
         raise RuntimeError("AnimeSR checkpoint must contain a state dictionary.")
@@ -133,7 +133,7 @@ def unwrap_state_dict(loaded: object) -> tuple[dict[str, torch.Tensor], dict[str
 
     if loaded.get("format") != FINE_TUNE_FORMAT:
         raise RuntimeError("Unsupported AniScale fine-tune checkpoint format.")
-    if loaded.get("domain") != "anime":
+    if loaded.get("domain") != domain:
         raise RuntimeError(
             "Refusing to export a non-anime checkpoint as AniUltraAnime."
         )
@@ -146,24 +146,24 @@ def unwrap_state_dict(loaded: object) -> tuple[dict[str, torch.Tensor], dict[str
         raise RuntimeError("AniScale checkpoint has an invalid training iteration.")
     return state_dict, {
         "source": "aniscale-finetune",
-        "domain": "anime",
+        "domain": domain,
         "iteration": iteration,
         "metrics": loaded.get("metrics", {}),
     }
 
 
-def load_model(checkpoint: Path) -> tuple[AnimeSRCell, dict[str, object]]:
+def load_model(checkpoint: Path, domain: str = 'anime') -> tuple[AnimeSRCell, dict[str, object]]:
     model = AnimeSRCell()
     loaded = torch.load(checkpoint, map_location="cpu", weights_only=True)
-    state_dict, metadata = unwrap_state_dict(loaded)
+    state_dict, metadata = unwrap_state_dict(loaded, domain)
     model.load_state_dict(state_dict, strict=True)
     return model.eval(), metadata
 
 
-def export(checkpoint: Path, output: Path) -> None:
+def export(checkpoint: Path, output: Path, domain: str = 'anime') -> None:
     import coremltools as ct
 
-    model, checkpoint_metadata = load_model(checkpoint)
+    model, checkpoint_metadata = load_model(checkpoint, domain)
     frames = torch.zeros(1, 9, 180, 320)
     feedback = torch.zeros(1, 3, 720, 1280)
     state = torch.zeros(1, 64, 180, 320)
@@ -213,7 +213,7 @@ def export(checkpoint: Path, output: Path) -> None:
     package.author = "Tencent ARC Lab; mobile conversion by AniScale"
     package.license = "Apache-2.0"
     package.short_description = (
-        "AniScale fine-tuned AnimeSR_v2 recurrent 4x anime video super-resolution cell"
+        f"AniScale {domain} checkpoint i{checkpoint_metadata.get('iteration')} recurrent video test"
         if checkpoint_metadata.get("source") == "aniscale-finetune"
         else "AnimeSR_v2 recurrent 4x anime video super-resolution cell"
     )
@@ -235,8 +235,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument('--domain', choices=['anime','live-action'], default='anime')
     arguments = parser.parse_args()
-    export(arguments.checkpoint, arguments.output)
+    export(arguments.checkpoint, arguments.output, arguments.domain)
 
 
 if __name__ == "__main__":

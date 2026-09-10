@@ -295,7 +295,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
   double _targetScale = 2;
   late int _performance;
   _VideoEngine _engine = _VideoEngine.animeUltra;
-  bool _cloud = true;
+  bool _cloud = false;
   late final TextEditingController _cloudToken;
   int _content = 0;
   int _detailMode = 0;
@@ -456,7 +456,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                         _VideoEngine.render => 'Render',
                         _VideoEngine.turbo => 'Turbo',
                         _VideoEngine.superUltra => 'Super',
-                        _VideoEngine.animeUltra => 'Anime VSR',
+                        _VideoEngine.animeUltra => _cloud ? 'Anime VSR' : 'Live 731',
                         _VideoEngine.realism => 'Realism',
                       },
                     )
@@ -469,7 +469,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                   } else if (_engine == _VideoEngine.realism) {
                     _detailMode = 1;
                   } else if (_engine == _VideoEngine.animeUltra) {
-                    _detailMode = 1;
+                    _detailMode = 0;
                   }
                 }),
               ),
@@ -480,7 +480,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                   _VideoEngine.render => 'AniScale Render — a heavier 23-block model for clean 3D surfaces, sharper geometry, and restrained noise.',
                   _VideoEngine.turbo => 'AniScale Turbo — a compact video model for faster processing and lower heat.',
                   _VideoEngine.superUltra => 'SuperUltra — offline SPAN restoration with native mobile acceleration and no temporary frame files.',
-                  _VideoEngine.animeUltra => 'AniUltraAnime — official AnimeSR_v2 with neighboring frames, persistent recurrent state, and automatic scene-cut reset.',
+                  _VideoEngine.animeUltra => _cloud ? 'AniUltraAnime — cloud anime checkpoint 413.' : 'Live Progress 731 — experimental live-action AnimeSR checkpoint, processed on this device. This is not CDA-VSR or the new x4 training experiment.',
                   _VideoEngine.realism => 'AniRealism Test — CDA-VSR recurrent live-action restoration with persistent temporal states and decoded-frame priors.',
                 },
                 textAlign: TextAlign.center,
@@ -494,7 +494,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                 _engine == _VideoEngine.superUltra
                     ? 'SUPERULTRA SCALE'
                     : _engine == _VideoEngine.animeUltra
-                    ? 'ANIME UPSCALE'
+                    ? (_cloud ? 'ANIME UPSCALE' : 'LIVE PROGRESS 731 UPSCALE')
                     : _engine == _VideoEngine.realism
                     ? 'LIVE-ACTION UPSCALE'
                     : 'VIDEO UPSCALE',
@@ -581,7 +581,7 @@ class _VideoSelectedScreenState extends State<VideoSelectedScreen> {
                     _VideoEngine.render => 'AniScale Render — 3D',
                     _VideoEngine.turbo => 'AniScale Turbo — Fast',
                     _VideoEngine.superUltra => 'SuperUltra — Offline SPAN',
-                    _VideoEngine.animeUltra => 'AniUltraAnime — AnimeSR_v2',
+                    _VideoEngine.animeUltra => _cloud ? 'AniUltraAnime — AnimeSR_v2' : 'Live Progress 731 — on-device test',
                     _VideoEngine.realism => 'AniRealism Test — CDA-VSR',
                   }),
                   subtitle: Text(
@@ -2654,7 +2654,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           SizedBox(height: 8),
                           Text(
-                            'AniUltraAnime — official AnimeSR_v2 recurrent anime-video restoration with neighboring-frame context and scene-cut state reset.',
+                            'Live Progress 731 — this private build uses experimental live-action AnimeSR weights in the local VSR slot. Cloud anime remains iteration 413.',
                           ),
                         ],
                       ),

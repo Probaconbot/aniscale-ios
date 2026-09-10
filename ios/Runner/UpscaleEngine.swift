@@ -741,7 +741,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
             parameters: [
               kCIInputSharpnessKey: detailMode == "sharp"
                 ? 0.62
-                : (detailMode == "detailed" ? 0.44 : 0.20)
+                : (detailMode == "detailed" ? 0.44 : 0.0)
             ]
           )
           if detailMode != "natural" {
@@ -818,7 +818,7 @@ final class UpscaleEngine: NSObject, FlutterStreamHandler {
       "engine": engine == "superUltra"
         ? "SuperUltra — \(content.capitalized), \(detailMode.capitalized) (Core ML/Metal)"
         : (engine == "animeUltra"
-          ? "AniUltraAnime — AnimeSR_v2 recurrent (Core ML/Metal)"
+          ? "Live Progress 731 — experimental AnimeSR (Core ML/Metal)"
           : (engine == "realism"
             ? "AniRealism Test — CDA-VSR recurrent (ONNX Runtime/Core ML)"
             : (efficient

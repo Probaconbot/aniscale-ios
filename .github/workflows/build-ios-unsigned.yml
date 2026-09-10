@@ -3,7 +3,7 @@ name: Build AniScale mobile releases
 on:
   push:
     branches:
-      - codex/cda-vsr-private-test
+      - codex/mobile-live731-test
   workflow_dispatch:
     inputs:
       private_test:
@@ -15,7 +15,7 @@ on:
         description: Private test version label
         required: false
         type: string
-        default: 1.15.5-trained-anime-test.1
+        default: 1.15.6-live731-device-test.1
 
 permissions:
   contents: write
@@ -93,27 +93,26 @@ jobs:
           path: |
             ios/Runner/Models/AniUltraAnime_v2_recurrent.mlpackage
             android/app/src/main/assets/models/AniUltraAnime_v2_recurrent.onnx
-          key: aniultraanime-v2-trained-i413-f76cf6e-${{ hashFiles('tools/convert_animesr_mobile.py') }}
+          key: live-progress-i731-7a685c4-${{ hashFiles('tools/convert_animesr_mobile.py') }}
 
       - name: Convert private trained AnimeSR v2 for Android and iPhone
         if: steps.anime-vsr-cache.outputs.cache-hit != 'true'
         shell: bash
         env:
-          HF_SPACE_TOKEN: ${{ secrets.HF_SPACE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           python -m pip install --upgrade pip
           python -m pip install "numpy<2" "torch==2.5.1" "coremltools==8.1" "onnx==1.17.0"
           mkdir -p "$RUNNER_TEMP/animesr-weights" build/aniultraanime ios/Runner/Models android/app/src/main/assets/models
-          test -n "$HF_SPACE_TOKEN"
+          test -n "$GH_TOKEN"
           ANIME_CHECKPOINT="$RUNNER_TEMP/animesr-weights/anime-latest.pth"
-          curl -L --fail --silent --show-error \
-            -H "Authorization: Bearer $HF_SPACE_TOKEN" \
-            -o "$ANIME_CHECKPOINT" \
-            'https://huggingface.co/spaces/Lushus6pg/aniscale-video/resolve/main/inference_models/anime-i413.pth?download=true'
-          echo "f76cf6ec4b113d4f6182e3b5450fe37b77f7121f0532c4ea9e30e0d95a2ef7bc  $ANIME_CHECKPOINT" | shasum -a 256 -c -
+          gh api -H 'Accept: application/octet-stream' repos/Probaconbot/aniscale-ios/releases/assets/555441164 > "$ANIME_CHECKPOINT"
+          echo "7a685c4a1b18ad4a3dfc961cf10b8948311d22c280fbd4014dec47ee7480a89b  $ANIME_CHECKPOINT" | shasum -a 256 -c -
           python -m unittest tools.test_animesr_mobile
+          python -m tools.verify_live_progress --checkpoint "$ANIME_CHECKPOINT"
           python tools/convert_animesr_mobile.py \
             --checkpoint "$ANIME_CHECKPOINT" \
+            --domain live-action \
             --output build/aniultraanime
           cp build/aniultraanime/AniUltraAnime_v2_recurrent.onnx \
             android/app/src/main/assets/models/
@@ -133,7 +132,7 @@ jobs:
           path: |
             ios/Runner/Models/AniUltraAnime_v2_recurrent.mlpackage
             android/app/src/main/assets/models/AniUltraAnime_v2_recurrent.onnx
-          key: aniultraanime-v2-trained-i413-f76cf6e-${{ hashFiles('tools/convert_animesr_mobile.py') }}
+          key: live-progress-i731-7a685c4-${{ hashFiles('tools/convert_animesr_mobile.py') }}
 
       - name: Restore private AniRealism CDA-VSR models
         id: cda-vsr-cache
@@ -363,7 +362,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TEST_VERSION: ${{ inputs.version || '1.15.5-trained-anime-test.1' }}
+          TEST_VERSION: ${{ inputs.version || '1.15.6-live731-device-test.1' }}
         run: |
           set -euo pipefail
           test -n "$TEST_VERSION"
@@ -373,48 +372,20 @@ jobs:
           cp build/app/outputs/flutter-apk/app-release.apk "$ANDROID_FILE"
           shasum -a 256 "$IOS_FILE" "$ANDROID_FILE" > SHA256SUMS.txt
           cat > "$RUNNER_TEMP/private-test-notes.md" <<'NOTES'
-          Private AniScale evaluation build. This release is an unpublished draft and is visible only to repository collaborators.
+          Private on-device progress checkpoint test. Version 1.15.6 (29).
 
-          - Adds AniRealism Test using CDA-VSR recurrent initializer/frame graphs.
-          - Preserves recurrent state between frames and resets at detected scene cuts.
-          - Uses decoded-frame motion/residual estimates for this first mobile test.
-          - Fixes launch-time memory pressure by loading one CDA-VSR graph at a time.
-          - Adds iOS Core ML fallback and flat Android tensor extraction to prevent tap-to-upscale crashes.
-          - Disables unsafe on-device Core ML compilation for flexible CDA graphs on iOS.
-          - Defers the full-resolution encoder buffer until inference temporaries are released.
-          - Restores higher-resolution CDA inference and adds edge-aware detail finishing.
-          - Exposes Natural, Detailed, and Sharp controls for AniRealism on both platforms.
-          - Raises AniUltraAnime's neural working resolution for genuinely more detailed 4K output.
-          - Adds anime-specific detail finishing and flat Android tensor extraction.
-          - Refines shared Liquid Glass with curved edge reflections and touch-following light while retaining the existing layout, tabs, and controls.
-          - Isolates glass repaints from content, fixes touch positioning on tall cards, and respects system and app reduced-motion settings.
-          - Connects AniUltraAnime to the private Lushus6pg/aniscale-video Hugging Face ZeroGPU Space.
-          - Adds explicit Hugging Face GPU / On device selection without changing the existing design.
-          - Streams upload, server progress, cancellation, and finished-video download on Android and iOS.
-          - Cloud mode never falls back to local neural processing. Other engines remain on-device.
-          - Requires your Space-authorized Hugging Face token, kept in app memory and never bundled.
-          - Free GPU test limits: SDR anime clips up to 10 seconds, 1080p, 100 MB; daily GPU quota applies.
-          - Fixes accidental default GPU allocation requests and scales reservation time to the actual shared hardware.
-          - Shows the server's actual GPU quota/error message instead of discarding it behind a generic failure.
-          - Adds private, resumable anime and live-action fine-tuning with edge, detail, and temporal losses.
-          - Updates AniUltraAnime from iteration 208 to experimental iteration 413 on Android, iOS, and private Hugging Face inference.
-          - Corrects RGB feedback channel ordering in the mobile export; tests compare three recurrent frames against the training network.
-          - Removes forced iOS contrast boosts and explicitly renders/tags SDR output as Rec.709.
-          - Preserves explicit cloud colour matrix, transfer, primaries, and range through RGB inference; colour and brightness round-trip tests cover HD/full-range and SD sources.
-          - The trained checkpoint is checksum-pinned, domain-validated, and exported from the private Space without bundling an access token.
-          - Separates pinned inference weights from mutable training checkpoints so later training cannot silently alter the deployed model.
-          - Keeps AniRealism on the audited CDA-VSR checkpoint; the incompatible experimental live-action fine-tune is not mislabeled or shipped.
-          - Preserves the verified live-action GPU bootstrap checkpoint for automatic continuation after the free quota resets.
-          - Keeps private datasets and raw training checkpoints out of the APK and IPA; converted anime weights are bundled for local inference.
-          - Checkpoint integrity and numerical parity pass. Held-out perceptual quality, sustained device speed, and thermal improvements are not yet established.
-          - Verified a real GPU round trip through the app transport, 29.97 FPS preservation and bit-identical copied audio on a synthetic test clip. This is not a full-size performance/quality benchmark or an actual iPhone device benchmark.
-          - Includes unsigned iOS IPA and Android APK.
-
-          CDA-VSR upstream licensing is not specified. These binaries are for private evaluation only and must not be published or redistributed.
+          - Select On device, then Live 731. This local test slot contains the exact live-action i731 EMA checkpoint, converted to ONNX for Android and FP16 Core ML for iOS.
+          - Source checkpoint SHA-256: 7a685c4a1b18ad4a3dfc961cf10b8948311d22c280fbd4014dec47ee7480a89b.
+          - This is the existing experimental AnimeSR-based live-action candidate shown in the comparison. It is not CDA-VSR and has not trained on the newly supplied x4 target dataset.
+          - Cloud mode still uses anime i413 and does not run this checkpoint. Choose On device to test i731 offline.
+          - On-device processing is the default. Supported local acceleration may be used; CPU-only execution is not forced.
+          - Natural detail is selected by default. Mobile processing still bounds input resolution for memory, and encoding/FP16 can differ from research output.
+          - This test build temporarily uses the local Anime VSR slot for Live 731; previous mobile releases retain local anime i413.
+          - Small held-out crop measurements improved for i731, but full-video quality, actual phone speed and thermal behavior have not been validated.
+          - Android APK, unsigned iOS IPA and checksums are included. Older releases are retained.
+          - CDA-VSR remains an unchanged separate private-evaluation engine with unresolved upstream licensing; do not redistribute this private build.
           NOTES
-          gh release create "v${TEST_VERSION}" \
-            "$IOS_FILE" "$ANDROID_FILE" SHA256SUMS.txt \
-            --draft \
-            --target "${GITHUB_SHA}" \
-            --title "AniScale ${TEST_VERSION} — Private Trained Anime Mobile Test" \
+          gh release upload "v$TEST_VERSION" "$IOS_FILE" "$ANDROID_FILE" SHA256SUMS.txt --clobber
+          gh release edit "v$TEST_VERSION" --draft --target "$GITHUB_SHA" \
+            --title "AniScale Live Progress 731 — Private Android and iOS Test" \
             --notes-file "$RUNNER_TEMP/private-test-notes.md"
